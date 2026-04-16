@@ -1388,7 +1388,7 @@ app.patch('/api/admin/clients/:id', authMiddleware, superAdminOnly, async (c) =>
                     action: 'UPDATE_IDENTIFIER',
                     oldValue: current.username || null,
                     newValue: String(username || '').trim().toLowerCase() || null,
-                    ipAddress: requestIp
+                    ipAddress:
                 });
             }
 
@@ -4271,6 +4271,60 @@ app.delete('/api/employes/:id', authMiddleware, moduleAccessMiddleware, async (c
     } catch (e: any) {
         console.error('Error deleting employee:', e);
         return c.json({ error: e.message }, 400);
+    }
+
+export default app;
+});
+
+// --- Envoi de facture par email et enregistrement de l'envoi ---
+app.post('/api/factures/:id/send', authMiddleware, async (c) => {
+    const db = getDb(c);
+    const user = c.get('user');
+    const factureId = c.req.param('id');
+    const { email } = await c.req.json(); // email d'envoi (obligatoire)
+    if (!email || !String(email).includes('@')) {
+        return c.json({ error: 'Adresse email invalide.' }, 400);
+    }
+    // Récupérer la facture
+    const facture = await db.prepare('SELECT * FROM facture WHERE id = ?').get(factureId);
+    if (!facture) {
+        return c.json({ error: 'Facture introuvable.' }, 404);
+    }
+    // Vérifier que l'utilisateur a le droit d'envoyer cette facture
+    if (user.type !== 'admin' && user.type !== 'client' && user.type !== 'collaborator') {
+        return c.json({ error: 'Accès refusé.' }, 403);
+    }
+    // Générer le lien PDF (supposé stocké dans facture.pdf_url ou à générer)
+    const pdfUrl = facture.pdf_url || (facture.payload_json && JSON.parse(facture.payload_json).pdf_url);
+    if (!pdfUrl) {
+        return c.json({ error: 'PDF non disponible pour cette facture.' }, 400);
+    }
+    // Envoi email via Resend
+    const resendKey = c.env?.RESEND_API_KEY || process.env.RESEND_API_KEY;
+    if (!resendKey) {
+        return c.json({ error: 'Service email non configuré.' }, 500);
+    }
+    const resend = new Resend(resendKey);
+    try {
+        await resend.emails.send({
+            from: "L'IAmani <notification@l-iamani.com>",
+            to: email,
+            subject: `Votre facture L'IAmani n°${facture.invoice_number}`,
+            html: `
+                <div style=\"font-family: sans-serif; padding: 20px; color: #333;\">
+                    <h2 style=\"color: #000;\">Votre facture</h2>
+                    <p>Bonjour,</p>
+                    <p>Veuillez trouver votre facture n°${facture.invoice_number} en pièce jointe ou via le lien ci-dessous :</p>
+                    <p><a href=\"${pdfUrl}\" target=\"_blank\">Télécharger la facture (PDF)</a></p>
+                    <p>Cordialement,<br>L'équipe L'IAmani</p>
+                </div>
+            `
+        });
+        // Mettre à jour l'historique d'envoi
+        await db.prepare('UPDATE facture SET last_sent_email = ?, last_sent_at = CURRENT_TIMESTAMP WHERE id = ?').run(email, factureId);
+        return c.json({ success: true });
+    } catch (e) {
+        return c.json({ error: "Erreur lors de l'envoi de l'email." });
     }
 });
 
