@@ -1083,7 +1083,7 @@ const AdminClientsView = () => {
 
     return (
         <div className="p-8">
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center justify-between mb-8">
                 <h1 className="text-2xl font-bold">Gestion des Clients</h1>
                 <button
                     onClick={() => setShowAddModal(true)}
@@ -1097,44 +1097,119 @@ const AdminClientsView = () => {
             ) : clients.length === 0 ? (
                 <div className="text-gray-500">Aucun client trouvé.</div>
             ) : (
-                <table className="min-w-full bg-white dark:bg-[#0A0A0A] rounded-xl overflow-hidden border border-gray-200 dark:border-white/10">
-                    <thead>
-                        <tr>
-                            <th className="px-4 py-2 text-left">Nom</th>
-                            <th className="px-4 py-2 text-left">Email</th>
-                            <th className="px-4 py-2 text-left">Pseudo</th>
-                            <th className="px-4 py-2 text-left">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {clients.map(client => (
-                            <tr key={client.id} className="border-t border-gray-100 dark:border-white/10">
-                                <td className="px-4 py-2">{client.name}</td>
-                                <td className="px-4 py-2">{client.email}</td>
-                                <td className="px-4 py-2">{client.username}</td>
-                                <td className="px-4 py-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-8">
+                    {clients.map(client => {
+                        const logoUrl = client.logo_url
+                            ? (String(client.logo_url).startsWith('http') ? client.logo_url : `${window.location.origin}${client.logo_url}`)
+                            : null;
+                        return (
+                            <motion.div
+                                key={client.id}
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                whileHover={{ scale: 1.03 }}
+                                className="bg-[#111111] rounded-2xl border border-white/10 p-7 flex flex-col items-center shadow-lg hover:border-white/30 transition-all group relative"
+                            >
+                                <Link
+                                    to={`/admin/clients/${client.id}`}
+                                    className="flex flex-col items-center w-full"
+                                    style={{ textDecoration: 'none' }}
+                                >
+                                    <div className="w-20 h-20 bg-white rounded-xl flex items-center justify-center mb-4 overflow-hidden border border-white/20 shadow-lg">
+                                        {logoUrl ? (
+                                            <img
+                                                src={logoUrl}
+                                                alt={client.company_name || client.name}
+                                                className="w-full h-full object-contain"
+                                                onError={e => (e.currentTarget as HTMLImageElement).style.display = 'none'}
+                                            />
+                                        ) : (
+                                            <ShieldCheck className="text-black opacity-60" size={36} />
+                                        )}
+                                    </div>
+                                    <h2 className="text-lg font-bold text-white text-center truncate w-full mb-1">{client.company_name || client.name}</h2>
+                                    <p className="text-xs text-gray-400 text-center w-full truncate mb-2">{client.email}</p>
+                                    <span className="text-[11px] font-mono text-gray-500 bg-white/5 rounded px-2 py-0.5 mb-2">{client.username}</span>
+                                </Link>
+                                <div className="flex gap-2 mt-2 w-full">
                                     <button
-                                        className="px-3 py-1 rounded bg-blue-600 text-white text-xs mr-2"
+                                        className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 transition-all"
                                         onClick={() => handleOpenFactures(client)}
+                                        title="Voir les factures"
                                     >
-                                        Factures
+                                        <FileText size={18} />
                                     </button>
                                     <button
-                                        className="px-3 py-1 rounded bg-gray-700 text-white text-xs"
+                                        className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-gray-700 text-white text-xs font-bold hover:bg-gray-800 transition-all"
                                         onClick={() => handleImpersonate(client.id)}
+                                        title="Connexion virtuelle"
                                     >
-                                        Se connecter
+                                        <UserCheck size={18} />
                                     </button>
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
+                                </div>
+                            </motion.div>
+                        );
+                    })}
+                </div>
             )}
 
             {/* Modals */}
             {/* Modal Nouveau Client, Factures, Succès Création */}
-            {/* ...existing code... */}
+            {/* Modal Factures Client */}
+            <AnimatePresence>
+                {selectedFactureClient && (
+                    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-6 overflow-y-auto transition-colors duration-200">
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.95 }}
+                            className="w-full max-w-3xl bg-white dark:bg-[#0A0A0A] rounded-2xl p-8 shadow-2xl border border-gray-200 dark:border-white/5 my-auto transition-colors duration-200"
+                        >
+                            <div className="flex items-center justify-between mb-6">
+                                <h2 className="text-xl font-bold text-slate-900 dark:text-white">Factures de {selectedFactureClient.name}</h2>
+                                <button onClick={() => setSelectedFactureClient(null)} className="text-gray-400 hover:text-black dark:hover:text-white transition-all text-lg font-bold">✕</button>
+                            </div>
+                            {facturesLoading ? (
+                                <div className="text-center text-gray-500 py-10">Chargement...</div>
+                            ) : clientFactures.length === 0 ? (
+                                <div className="text-center text-gray-500 py-10">Aucune facture générée.</div>
+                            ) : (
+                                <table className="w-full text-left border-separate border-spacing-y-2">
+                                    <thead>
+                                        <tr className="text-xs text-gray-500 uppercase tracking-widest">
+                                            <th className="pb-2">N°</th>
+                                            <th className="pb-2">Date</th>
+                                            <th className="pb-2">Montant</th>
+                                            <th className="pb-2">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {clientFactures.map((facture) => (
+                                            <tr key={facture.id} className="bg-white dark:bg-black rounded-xl shadow border border-gray-200 dark:border-white/10">
+                                                <td className="py-2 px-3 font-mono text-xs">{facture.invoice_number}</td>
+                                                <td className="py-2 px-3 text-xs">{facture.created_at ? new Date(facture.created_at).toLocaleDateString() : ''}</td>
+                                                <td className="py-2 px-3 text-xs">{toCurrency(facture.total)}</td>
+                                                <td className="py-2 px-3 flex gap-2">
+                                                    <a href={facture.pdf_url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline text-xs font-bold">PDF</a>
+                                                    {user?.type === 'admin' && user?.email === 'gev-emeni@outlook.fr' && (
+                                                        <button
+                                                            onClick={() => handleDeleteFacture(facture)}
+                                                            className="text-red-500 hover:text-red-700 text-xs font-bold disabled:opacity-50"
+                                                            disabled={deletingFactureId === String(facture.id)}
+                                                        >
+                                                            {deletingFactureId === String(facture.id) ? 'Suppression...' : 'Supprimer'}
+                                                        </button>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            )}
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
         </div>
     );
 };

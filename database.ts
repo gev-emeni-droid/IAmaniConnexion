@@ -31,6 +31,13 @@ const dbPath = path.join(process.cwd(), 'database.sqlite');
 const db = new Database(dbPath);
 
 // Migrations for existing tables (run before schema to ensure columns exist for indexes)
+// Ajout des colonnes pour l'envoi de facture par email
+try {
+    db.prepare('ALTER TABLE facture ADD COLUMN last_sent_email TEXT').run();
+} catch (e) {}
+try {
+    db.prepare('ALTER TABLE facture ADD COLUMN last_sent_at DATETIME').run();
+} catch (e) {}
 try {
     db.prepare('ALTER TABLE evenementiel ADD COLUMN calendar_id TEXT').run();
 } catch (e) {}
