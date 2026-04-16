@@ -1388,7 +1388,7 @@ app.patch('/api/admin/clients/:id', authMiddleware, superAdminOnly, async (c) =>
                     action: 'UPDATE_IDENTIFIER',
                     oldValue: current.username || null,
                     newValue: String(username || '').trim().toLowerCase() || null,
-                    ipAddress:
+                    ipAddress: requestIp
                 });
             }
 
@@ -4272,13 +4272,13 @@ app.delete('/api/employes/:id', authMiddleware, moduleAccessMiddleware, async (c
         console.error('Error deleting employee:', e);
         return c.json({ error: e.message }, 400);
     }
-
-export default app;
 });
+
 
 // --- Envoi de facture par email et enregistrement de l'envoi ---
 app.post('/api/factures/:id/send', authMiddleware, async (c) => {
     const db = getDb(c);
+    await ensureFactureColumns(db);
     const user = c.get('user');
     const factureId = c.req.param('id');
     const { email } = await c.req.json(); // email d'envoi (obligatoire)
@@ -4288,6 +4288,7 @@ app.post('/api/factures/:id/send', authMiddleware, async (c) => {
     // Récupérer la facture
     const facture = await db.prepare('SELECT * FROM facture WHERE id = ?').get(factureId);
     if (!facture) {
+        console.error('[API] Facture non trouvée pour envoi email', { factureId });
         return c.json({ error: 'Facture introuvable.' }, 404);
     }
     // Vérifier que l'utilisateur a le droit d'envoyer cette facture
@@ -4327,5 +4328,18 @@ app.post('/api/factures/:id/send', authMiddleware, async (c) => {
         return c.json({ error: "Erreur lors de l'envoi de l'email." });
     }
 });
+
+
+
+// Compatible ES module/tsx/Windows : démarrage du serveur si exécuté directement
+if (
+    (typeof process !== 'undefined' && process.argv &&
+        (process.argv[1]?.endsWith('app.ts') || process.argv[1]?.endsWith('app.js')))
+) {
+    import('@hono/node-server').then(({ serve }) => {
+        serve({ fetch: app.fetch, port: 3000 });
+        console.log('Hono server listening on http://localhost:3000');
+    });
+}
 
 export default app;

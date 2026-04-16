@@ -124,11 +124,11 @@ export const moduleApi = {
     searchFactureCRMContacts: (q: string) => apiFetch(`/facture/crm-search?q=${encodeURIComponent(q)}`),
     createFacture: (payload: any) => apiFetch('/facture', { method: 'POST', body: JSON.stringify(payload) }),
     sendFactureEmail: (id: string, payload: any) => apiFetch(`/facture/${id}/send-email`, { method: 'POST', body: JSON.stringify(payload) }),
-    // Nouvelle version : envoi de facture par email (PDF généré côté serveur)
-    sendFactureEmailServer: (factureId: string, to: string, invoicePayload: any, pdfBase64?: string, filename?: string) =>
-        apiFetch(`/facture/${factureId}/send-email`, {
+    // Nouvelle version : envoi de facture par email (historique enregistré côté serveur)
+    sendFactureEmailServer: (factureId: string, to: string) =>
+        apiFetch(`/factures/${factureId}/send`, {
             method: 'POST',
-            body: JSON.stringify({ to, invoicePayload, pdfBase64, filename }),
+            body: JSON.stringify({ email: to }),
         }),
     deleteFacture: (id: string) => apiFetch(`/facture/${id}`, { method: 'DELETE' }),
     getBillingSettings: () => apiFetch('/facture/billing-settings'),

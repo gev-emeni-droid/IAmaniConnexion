@@ -765,11 +765,11 @@ body { margin: 0; padding: 0; background: #ffffff; }
         setEmailModalOpen(false);
 
         try {
-            // Générer le PDF côté frontend
-            const pdfBase64 = await generatePreviewPdfBase64();
-            const filename = `${payload.invoiceNumber || 'facture'}.pdf`;
-            await moduleApi.sendFactureEmailServer(invoiceId, email, payload, pdfBase64, filename);
+            // Envoi via la nouvelle route backend (historique enregistré côté serveur)
+            await moduleApi.sendFactureEmailServer(invoiceId, email);
             await saveCurrentInvoice(payload);
+            // Rafraîchir l'historique si callback fourni
+            if (typeof onInvoiceSaved === 'function') onInvoiceSaved();
         } catch (e: any) {
             // Silencieux
         } finally {
