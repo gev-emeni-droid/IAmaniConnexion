@@ -1082,7 +1082,57 @@ const AdminClientsView = () => {
     // ...existing code...
 
     return (
-        <div>
+        <div className="p-8">
+            <div className="flex items-center justify-between mb-6">
+                <h1 className="text-2xl font-bold">Gestion des Clients</h1>
+                <button
+                    onClick={() => setShowAddModal(true)}
+                    className="px-4 py-2 rounded-lg bg-black text-white font-bold hover:bg-gray-800"
+                >
+                    + Ajouter un client
+                </button>
+            </div>
+            {loading ? (
+                <div>Chargement...</div>
+            ) : clients.length === 0 ? (
+                <div className="text-gray-500">Aucun client trouvé.</div>
+            ) : (
+                <table className="min-w-full bg-white dark:bg-[#0A0A0A] rounded-xl overflow-hidden border border-gray-200 dark:border-white/10">
+                    <thead>
+                        <tr>
+                            <th className="px-4 py-2 text-left">Nom</th>
+                            <th className="px-4 py-2 text-left">Email</th>
+                            <th className="px-4 py-2 text-left">Pseudo</th>
+                            <th className="px-4 py-2 text-left">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {clients.map(client => (
+                            <tr key={client.id} className="border-t border-gray-100 dark:border-white/10">
+                                <td className="px-4 py-2">{client.name}</td>
+                                <td className="px-4 py-2">{client.email}</td>
+                                <td className="px-4 py-2">{client.username}</td>
+                                <td className="px-4 py-2">
+                                    <button
+                                        className="px-3 py-1 rounded bg-blue-600 text-white text-xs mr-2"
+                                        onClick={() => handleOpenFactures(client)}
+                                    >
+                                        Factures
+                                    </button>
+                                    <button
+                                        className="px-3 py-1 rounded bg-gray-700 text-white text-xs"
+                                        onClick={() => handleImpersonate(client.id)}
+                                    >
+                                        Se connecter
+                                    </button>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            )}
+
+            {/* Modals */}
             {/* Modal Nouveau Client, Factures, Succès Création */}
             {/* ...existing code... */}
         </div>
