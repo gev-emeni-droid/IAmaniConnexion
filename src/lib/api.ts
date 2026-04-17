@@ -126,20 +126,20 @@ export const moduleApi = {
     getCRMContact: (id: string) => apiFetch(`/crm/contacts/${id}`),
     updateCRMContact: (id: string, payload: any) => apiFetch(`/crm/contacts/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
     deleteCRMContact: (id: string) => apiFetch(`/crm/contacts/${id}`, { method: 'DELETE' }),
-    getFacture: () => apiFetch('/facture'),
-    getFactures: () => apiFetch('/facture'),
-    searchFactureCRMContacts: (q: string) => apiFetch(`/facture/crm-search?q=${encodeURIComponent(q)}`),
-    createFacture: (payload: any) => apiFetch('/facture', { method: 'POST', body: JSON.stringify(payload) }),
+    getFacture: () => apiFetch('/api/facture'),
+    getFactures: () => apiFetch('/api/facture'),
+    searchFactureCRMContacts: (q: string) => apiFetch(`/api/facture/crm-search?q=${encodeURIComponent(q)}`),
+    createFacture: (payload: any) => apiFetch('/api/facture', { method: 'POST', body: JSON.stringify(payload) }),
     sendFactureEmail: (id: string, payload: any) => apiFetch(`/api/facture/${id}/send-email`, { method: 'POST', body: JSON.stringify(payload) }),
     // Nouvelle version : envoi de facture par email (historique enregistré côté serveur)
     sendFactureEmailServer: (factureId: string, to: string) =>
-        apiFetch(`/factures/${factureId}/send`, {
+        apiFetch(`/api/facture/${factureId}/send`, {
             method: 'POST',
             body: JSON.stringify({ email: to }),
         }),
-    deleteFacture: (id: string) => apiFetch(`/facture/${id}`, { method: 'DELETE' }),
-    getBillingSettings: () => apiFetch('/facture/billing-settings'),
-    saveBillingSettings: (payload: any) => apiFetch('/facture/billing-settings', { method: 'PUT', body: JSON.stringify(payload) }),
+    deleteFacture: (id: string) => apiFetch(`/api/facture/${id}`, { method: 'DELETE' }),
+    getBillingSettings: () => apiFetch('/api/facture/billing-settings'),
+    saveBillingSettings: (payload: any) => apiFetch('/api/facture/billing-settings', { method: 'PUT', body: JSON.stringify(payload) }),
     getEmployes: () => apiFetch('/employes'),
     createEmploye: (payload: any) => apiFetch('/employes', { method: 'POST', body: JSON.stringify(payload) }),
     updateEmploye: (id: string, payload: any) => apiFetch(`/employes/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
