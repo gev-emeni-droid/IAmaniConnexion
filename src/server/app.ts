@@ -1,6 +1,9 @@
 
 // ...existing code...
 
+
+// ...existing code...
+
 // Route pour enregistrer une action d'historique sur une facture (email, print, download)
 app.post('/api/facture/:id/history', authMiddleware, moduleAccessMiddleware, async (c) => {
     try {
