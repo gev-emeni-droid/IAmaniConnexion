@@ -1,32 +1,4 @@
 
-// ...existing code...
-
-
-// ...existing code...
-
-// Route pour enregistrer une action d'historique sur une facture (email, print, download)
-app.post('/api/facture/:id/history', authMiddleware, moduleAccessMiddleware, async (c) => {
-    try {
-        const user = c.get('user');
-        const db = getDb(c);
-        await ensureFactureHistoryTable(db);
-        const id = String(c.req.param('id') || '').trim();
-        const body = await c.req.json();
-        const action = String(body?.action || '').trim();
-        const clientId = String(body?.client_id || user.clientId || '');
-        const email = body?.email ? String(body.email).trim() : null;
-        const pdf_filename = body?.pdf_filename ? String(body.pdf_filename).trim() : null;
-        if (!id || !action || !clientId) {
-            return c.json({ error: 'Paramètres manquants' }, 400);
-        }
-        await db.prepare(`INSERT INTO facture_history (facture_id, client_id, action, email, pdf_filename) VALUES (?, ?, ?, ?, ?)`)
-            .run(id, clientId, action, email, pdf_filename);
-        return c.json({ success: true });
-    } catch (e: any) {
-        console.error('Erreur enregistrement historique facture:', e);
-        return c.json({ error: e.message }, 500);
-    }
-});
 
 // ...existing code...
 
