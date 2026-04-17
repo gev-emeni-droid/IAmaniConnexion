@@ -2,4 +2,4 @@
 import { apiFetch } from './api';
 
 export const getFactureHistory = (factureId: string) =>
-  apiFetch(`/facture/${factureId}/history`);
+  apiFetch(`/api/facture/${factureId}/history`);

@@ -1,3 +1,29 @@
+// Route pour enregistrer une action d'historique sur une facture (email, print, download)
+app.post('/api/facture/:id/history', authMiddleware, moduleAccessMiddleware, async (c) => {
+    try {
+        const user = c.get('user');
+        const db = getDb(c);
+        await ensureFactureHistoryTable(db);
+        const id = String(c.req.param('id') || '').trim();
+        const body = await c.req.json();
+        const action = String(body?.action || '').trim();
+        const clientId = String(body?.client_id || user.clientId || '');
+        const email = body?.email ? String(body.email).trim() : null;
+        const pdf_filename = body?.pdf_filename ? String(body.pdf_filename).trim() : null;
+        if (!id || !action || !clientId) {
+            return c.json({ error: 'Paramètres manquants' }, 400);
+        }
+        await db.prepare(`INSERT INTO facture_history (facture_id, client_id, action, email, pdf_filename) VALUES (?, ?, ?, ?, ?)`)
+            .run(id, clientId, action, email, pdf_filename);
+        return c.json({ success: true });
+    } catch (e: any) {
+        console.error('Erreur enregistrement historique facture:', e);
+        return c.json({ error: e.message }, 500);
+    }
+});
+// ...la déclaration de la route sera replacée après l'initialisation de app...
+// Route pour enregistrer une action d'historique sur une facture (email, print, download)
+// ...la déclaration de la route sera replacée après l'initialisation de app...
 
 // ...existing code...
 
@@ -3938,9 +3964,10 @@ app.post('/api/facture/:id/send-email', authMiddleware, moduleAccessMiddleware, 
             return c.json({ error: 'RESEND_API_KEY manquante sur le serveur.' }, 500);
         }
 
+
         // Répondre immédiatement au frontend
         console.log('[FACTURE EMAIL] Tous les prérequis sont OK, envoi du mail en tâche de fond...');
-        c.json({ success: true });
+        return c.json({ success: true });
 
         // Envoi du mail en tâche de fond
         setImmediate(async () => {
@@ -3984,7 +4011,7 @@ app.post('/api/facture/:id/send-email', authMiddleware, moduleAccessMiddleware, 
                 });
                 console.log('[FACTURE EMAIL] Résultat envoi Resend:', JSON.stringify(emailResult));
                 // Enregistrement dans l'historique d'envoi si succès
-                if (emailResult && typeof emailResult === 'object' && 'id' in emailResult && emailResult.id) {
+                if (emailResult && typeof emailResult === 'object' && emailResult.data && emailResult.data.id) {
                     try {
                         await ensureFactureHistoryTable(db);
                         await db.prepare(`INSERT INTO facture_history (facture_id, client_id, action, email, pdf_filename) VALUES (?, ?, 'email', ?, ?)`)

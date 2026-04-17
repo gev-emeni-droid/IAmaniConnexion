@@ -24,6 +24,23 @@ export const InvoiceHistory = ({ refreshKey = 0, onBack, onOpenInvoice, onDownlo
     const [history, setHistory] = React.useState<any[]>([]);
     const [historyLoading, setHistoryLoading] = React.useState(false);
     const [historyFor, setHistoryFor] = React.useState<string | null>(null);
+    const [resendLoading, setResendLoading] = React.useState<string | null>(null);
+    const [customEmail, setCustomEmail] = React.useState('');
+    const [customSendLoading, setCustomSendLoading] = React.useState(false);
+    const [customSendError, setCustomSendError] = React.useState('');
+    // Fonction pour renvoyer la facture à une adresse donnée
+    const resendInvoice = async (factureId: string, email: string) => {
+        if (!email) return;
+        setResendLoading(email);
+        try {
+            await moduleApi.sendFactureEmail(factureId, { to: email });
+            alert('Facture renvoyée à ' + email);
+        } catch (e: any) {
+            alert('Erreur lors de l’envoi : ' + (e?.message || 'Erreur inconnue'));
+        } finally {
+            setResendLoading(null);
+        }
+    };
 
     const isSuperAdminSession = Boolean(
         (user?.type === 'admin' && user?.email?.toLowerCase() === 'gev-emeni@outlook.fr') ||
@@ -180,6 +197,7 @@ export const InvoiceHistory = ({ refreshKey = 0, onBack, onOpenInvoice, onDownlo
                                     <th>Action</th>
                                     <th>Email</th>
                                     <th>PDF</th>
+                                    <th>Renvoyer</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -189,11 +207,52 @@ export const InvoiceHistory = ({ refreshKey = 0, onBack, onOpenInvoice, onDownlo
                                         <td>{h.action}</td>
                                         <td>{h.email || '-'}</td>
                                         <td>{h.pdf_filename || '-'}</td>
+                                        <td>
+                                            {h.email && (
+                                                <button
+                                                    className="px-2 py-1 text-xs rounded bg-[#2f9e9e] text-white hover:opacity-90 disabled:opacity-60"
+                                                    disabled={resendLoading === h.email}
+                                                    onClick={() => resendInvoice(historyFor, h.email)}
+                                                >
+                                                    {resendLoading === h.email ? 'Envoi...' : 'Renvoyer'}
+                                                </button>
+                                            )}
+                                        </td>
                                     </tr>
                                 ))}
                             </tbody>
                         </table>
                     )}
+                    {/* Champ pour saisir une nouvelle adresse */}
+                    <div className="mt-4 flex items-center gap-2">
+                        <input
+                            type="email"
+                            placeholder="Nouvelle adresse email..."
+                            value={customEmail}
+                            onChange={e => setCustomEmail(e.target.value)}
+                            className="px-2 py-1 border rounded text-sm"
+                            style={{ minWidth: 220 }}
+                        />
+                        <button
+                            className="px-3 py-1 text-xs rounded bg-[#2f9e9e] text-white hover:opacity-90 disabled:opacity-60"
+                            disabled={customSendLoading || !customEmail}
+                            onClick={async () => {
+                                setCustomSendLoading(true);
+                                setCustomSendError('');
+                                try {
+                                    await resendInvoice(historyFor, customEmail);
+                                    setCustomEmail('');
+                                } catch (e: any) {
+                                    setCustomSendError(e?.message || 'Erreur inconnue');
+                                } finally {
+                                    setCustomSendLoading(false);
+                                }
+                            }}
+                        >
+                            {customSendLoading ? 'Envoi...' : 'Envoyer à une autre adresse'}
+                        </button>
+                        {customSendError && <span className="text-xs text-red-500 ml-2">{customSendError}</span>}
+                    </div>
                     <button onClick={() => setHistoryFor(null)} className="mt-2 text-xs underline">Fermer</button>
                 </div>
             )}
