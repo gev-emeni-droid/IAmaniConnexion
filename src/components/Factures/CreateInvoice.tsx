@@ -651,6 +651,14 @@ body { margin: 0; padding: 0; background: #ffffff; }
             popup.close();
             return;
         }
+        // Enregistrement action print
+        try {
+            if (saved.id && user?.clientId) {
+                await moduleApi.recordFactureAction(String(saved.id), String(user.clientId), 'print');
+            }
+        } catch (e) {
+            // Optionnel : afficher une erreur ou ignorer
+        }
         openPrintWindow(popup);
     };
 
@@ -739,6 +747,15 @@ body { margin: 0; padding: 0; background: #ffffff; }
         const saved = await saveCurrentInvoice();
         if (!saved) return;
 
+        // Enregistrement action download
+        try {
+            if (saved.id && user?.clientId) {
+                await moduleApi.recordFactureAction(String(saved.id), String(user.clientId), 'download');
+            }
+        } catch (e) {
+            // Optionnel : afficher une erreur ou ignorer
+        }
+
         try {
             const pdf = await generatePreviewPdfDocument();
             pdf.save(`${invoiceNumber || 'facture'}.pdf`);
@@ -765,9 +782,15 @@ body { margin: 0; padding: 0; background: #ffffff; }
         setEmailModalOpen(false);
 
         try {
-            // Envoi via la nouvelle route backend (historique enregistré côté serveur)
-            await moduleApi.sendFactureEmailServer(invoiceId, email);
+            // Générer le PDF côté frontend comme avant
+            const pdfBase64 = await generatePreviewPdfBase64();
+            const filename = `${payload.invoiceNumber || 'facture'}.pdf`;
+            await moduleApi.sendFactureEmail(invoiceId, { to: email, pdfBase64, filename });
             await saveCurrentInvoice(payload);
+            // Enregistrement action email dans l'historique
+            if (invoiceId && user?.clientId) {
+                await moduleApi.recordFactureAction(invoiceId, String(user.clientId), 'email', email);
+            }
             // Rafraîchir l'historique si callback fourni
             if (typeof onInvoiceSaved === 'function') onInvoiceSaved();
         } catch (e: any) {

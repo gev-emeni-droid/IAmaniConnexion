@@ -1,3 +1,35 @@
+// Création de la table d'historique des actions sur les factures
+const ensureFactureHistoryTable = async (db: any) => {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS facture_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        facture_id TEXT NOT NULL,
+        client_id TEXT NOT NULL,
+        action TEXT NOT NULL, -- 'email', 'print', 'download'
+        email TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(facture_id, client_id, action, email)
+    )`).run();
+};
+
+// Enregistrement d'une action sur une facture (print/download/email)
+app.post('/api/facture/:id/history', async (c) => {
+    try {
+        const db = localDb;
+        const factureId = c.req.param('id');
+        const { action, email, client_id } = await c.req.json();
+        if (!['print', 'download', 'email'].includes(action)) {
+            return c.json({ error: 'Action non supportée' }, 400);
+        }
+        if (!factureId || !client_id) {
+            return c.json({ error: 'facture_id et client_id requis' }, 400);
+        }
+        await db.prepare(`INSERT OR IGNORE INTO facture_history (facture_id, client_id, action, email) VALUES (?, ?, ?, ?)`)
+            .run(factureId, client_id, action, email || null);
+        return c.json({ success: true });
+    } catch (e: any) {
+        return c.json({ error: e.message }, 500);
+    }
+});
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { verify, sign } from 'hono/jwt';
@@ -10,7 +42,7 @@ import { config as loadEnv } from 'dotenv';
 import { serveStatic } from '@hono/node-server/serve-static';
 import * as XLSX from 'xlsx';
 import { PDFParse } from 'pdf-parse';
-import localDb from '../../database';
+import localDb from '../../database.ts';
 
 // Load local overrides first, then fallback to .env.
 loadEnv({ path: '.env.local' });
@@ -82,6 +114,8 @@ const getDb = (c: any) => {
     return localDb;
 };
 
+// Initialisation de la table d'historique au démarrage
+ensureFactureHistoryTable(localDb).catch(console.error);
 const resolveClientId = (user: any, bodyClientId?: string) => {
     if (user.type === 'admin') {
         return bodyClientId || null;
@@ -3912,7 +3946,7 @@ app.post('/api/facture/:id/send-email', authMiddleware, moduleAccessMiddleware, 
                     .replace(/[^a-zA-Z0-9._-]/g, '_');
                 const resend = new Resend(resendKey);
 
-                await resend.emails.send({
+                const emailResult = await resend.emails.send({
                     from: `${senderLabel} <notification@l-iamani.com>`,
                     to: recipientEmail,
                     subject: `[${establishmentName}] Votre facture du "${displayDate}"`,
@@ -3925,6 +3959,20 @@ app.post('/api/facture/:id/send-email', authMiddleware, moduleAccessMiddleware, 
                         }
                     ]
                 });
+                console.log('[FACTURE EMAIL] Résultat envoi Resend:', JSON.stringify(emailResult));
+                // Enregistrement dans l'historique d'envoi si succès
+                if (emailResult && emailResult.id) {
+                    try {
+                        await ensureFactureHistoryTable(db);
+                        await db.prepare(`INSERT OR IGNORE INTO facture_history (facture_id, client_id, action, email) VALUES (?, ?, 'email', ?)`)
+                            .run(id, user.clientId, recipientEmail);
+                        console.log('[FACTURE EMAIL] Historique d\'envoi enregistré pour la facture', id);
+                    } catch (histErr) {
+                        console.error('[FACTURE EMAIL] Erreur lors de l\'enregistrement de l\'historique:', histErr);
+                    }
+                } else {
+                    console.error('[FACTURE EMAIL] Echec d\'envoi ou pas d\'ID de message retourné:', emailResult);
+                }
             } catch (err) {
                 console.error('Erreur lors de l’envoi du mail de facture (async) :', err);
             }

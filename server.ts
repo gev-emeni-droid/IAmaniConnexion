@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { getRequestListener } from '@hono/node-server';
 import { config as loadEnv } from 'dotenv';
-import app from './src/server/app';
+import app from './src/server/app.ts';
 
 // Load local overrides first, then fallback to .env.
 loadEnv({ path: '.env.local' });

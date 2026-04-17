@@ -1,3 +1,10 @@
+// Enregistrer une action d'historique (print/download/email) pour une facture
+export const recordFactureAction = async (factureId: string, clientId: string, action: 'print' | 'download' | 'email', email?: string) => {
+    return apiFetch(`/facture/${factureId}/history`, {
+        method: 'POST',
+        body: JSON.stringify({ action, client_id: clientId, email }),
+    });
+};
 const API_URL = '/api';
 
 type ApiFetchOptions = RequestInit & { timeoutMs?: number };
