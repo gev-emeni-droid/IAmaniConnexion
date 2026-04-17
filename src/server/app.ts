@@ -3965,68 +3965,66 @@ app.post('/api/facture/:id/send-email', authMiddleware, moduleAccessMiddleware, 
         }
 
 
-        // Répondre immédiatement au frontend
-        console.log('[FACTURE EMAIL] Tous les prérequis sont OK, envoi du mail en tâche de fond...');
-        return c.json({ success: true });
-
-        // Envoi du mail en tâche de fond
-        setImmediate(async () => {
-            try {
-                const nextPayload = { ...payload, ...requestPayload, recipientEmail };
-                if (invoice) {
-                    await db.prepare('UPDATE facture SET payload_json = ? WHERE id = ? AND client_id = ?').run(JSON.stringify(nextPayload), id, user.clientId);
-                }
-
-                // Récupération intelligente du nom d'établissement
-                let establishmentName = String(settings.company_name || '').trim();
-                if (!establishmentName && user && user.clientId) {
-                    // Aller chercher dans la table clients si non présent dans settings
-                    const clientRow = await db.prepare('SELECT company_name, name FROM clients WHERE id = ?').get(user.clientId) as any;
-                    establishmentName = String(clientRow?.company_name || clientRow?.name || 'Votre établissement').trim();
-                }
-                if (!establishmentName) establishmentName = 'Votre établissement';
-                // Correction de l'expression régulière pour supprimer les caractères interdits
-                const senderLabel = establishmentName.replace(/[<>"\n]/g, '').trim() || 'Votre établissement';
-                const displayDate = formatFactureEmailDate(nextPayload.invoiceDate || virtualInvoice.due_date);
-                const providedPdfBase64 = String(body?.pdfBase64 || '').trim();
-                const pdfBuffer = providedPdfBase64
-                    ? Buffer.from(providedPdfBase64, 'base64')
-                    : buildFacturePdfBuffer({ invoice: virtualInvoice, payload: nextPayload, settings });
-                const safeFilename = String(body?.filename || `${String(virtualInvoice.invoice_number || nextPayload.invoiceNumber || 'facture').replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`)
-                    .replace(/[^a-zA-Z0-9._-]/g, '_');
-                const resend = new Resend(resendKey);
-
-                const emailResult = await resend.emails.send({
-                    from: `${senderLabel} <notification@l-iamani.com>`,
-                    to: recipientEmail,
-                    subject: `[${establishmentName}] Votre facture du "${displayDate}"`,
-                    text: `Bonjour,\n\nVous trouverez ci-joint votre facture du ${displayDate}, bonne réception.\n\nCordialement,\n${establishmentName}`,
-                    html: `<p>Bonjour,</p><p>Vous trouverez ci-joint votre facture du ${displayDate}, bonne réception.</p><p>Cordialement,<br/>${establishmentName}</p>`,
-                    attachments: [
-                        {
-                            filename: safeFilename,
-                            content: pdfBuffer,
-                        }
-                    ]
-                });
-                console.log('[FACTURE EMAIL] Résultat envoi Resend:', JSON.stringify(emailResult));
-                // Enregistrement dans l'historique d'envoi si succès
-                if (emailResult && typeof emailResult === 'object' && emailResult.data && emailResult.data.id) {
-                    try {
-                        await ensureFactureHistoryTable(db);
-                        await db.prepare(`INSERT INTO facture_history (facture_id, client_id, action, email, pdf_filename) VALUES (?, ?, 'email', ?, ?)`)
-                            .run(id, user.clientId, recipientEmail, safeFilename);
-                        console.log('[FACTURE EMAIL] Historique d\'envoi enregistré pour la facture', id, 'PDF:', safeFilename);
-                    } catch (histErr) {
-                        console.error('[FACTURE EMAIL] Erreur lors de l\'enregistrement de l\'historique:', histErr);
-                    }
-                } else {
-                    console.error('[FACTURE EMAIL] Echec d\'envoi ou pas d\'ID de message retourné:', emailResult);
-                }
-            } catch (err) {
-                console.error('Erreur lors de l’envoi du mail de facture (async) :', err);
+        // Envoi du mail et enregistrement dans l'historique AVANT de répondre au frontend
+        try {
+            const nextPayload = { ...payload, ...requestPayload, recipientEmail };
+            if (invoice) {
+                await db.prepare('UPDATE facture SET payload_json = ? WHERE id = ? AND client_id = ?').run(JSON.stringify(nextPayload), id, user.clientId);
             }
-        });
+
+            // Récupération intelligente du nom d'établissement
+            let establishmentName = String(settings.company_name || '').trim();
+            if (!establishmentName && user && user.clientId) {
+                // Aller chercher dans la table clients si non présent dans settings
+                const clientRow = await db.prepare('SELECT company_name, name FROM clients WHERE id = ?').get(user.clientId) as any;
+                establishmentName = String(clientRow?.company_name || clientRow?.name || 'Votre établissement').trim();
+            }
+            if (!establishmentName) establishmentName = 'Votre établissement';
+            // Correction de l'expression régulière pour supprimer les caractères interdits
+            const senderLabel = establishmentName.replace(/[<>"\n]/g, '').trim() || 'Votre établissement';
+            const displayDate = formatFactureEmailDate(nextPayload.invoiceDate || virtualInvoice.due_date);
+            const providedPdfBase64 = String(body?.pdfBase64 || '').trim();
+            const pdfBuffer = providedPdfBase64
+                ? Buffer.from(providedPdfBase64, 'base64')
+                : buildFacturePdfBuffer({ invoice: virtualInvoice, payload: nextPayload, settings });
+            const safeFilename = String(body?.filename || `${String(virtualInvoice.invoice_number || nextPayload.invoiceNumber || 'facture').replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`)
+                .replace(/[^a-zA-Z0-9._-]/g, '_');
+            const resend = new Resend(resendKey);
+
+            const emailResult = await resend.emails.send({
+                from: `${senderLabel} <notification@l-iamani.com>`,
+                to: recipientEmail,
+                subject: `[${establishmentName}] Votre facture du "${displayDate}"`,
+                text: `Bonjour,\n\nVous trouverez ci-joint votre facture du ${displayDate}, bonne réception.\n\nCordialement,\n${establishmentName}`,
+                html: `<p>Bonjour,</p><p>Vous trouverez ci-joint votre facture du ${displayDate}, bonne réception.</p><p>Cordialement,<br/>${establishmentName}</p>`,
+                attachments: [
+                    {
+                        filename: safeFilename,
+                        content: pdfBuffer,
+                    }
+                ]
+            });
+            console.log('[FACTURE EMAIL] Résultat envoi Resend:', JSON.stringify(emailResult));
+            // Enregistrement dans l'historique d'envoi si succès
+            if (emailResult && typeof emailResult === 'object' && emailResult.data && emailResult.data.id) {
+                try {
+                    await ensureFactureHistoryTable(db);
+                    await db.prepare(`INSERT INTO facture_history (facture_id, client_id, action, email, pdf_filename) VALUES (?, ?, 'email', ?, ?)`)
+                        .run(id, user.clientId, recipientEmail, safeFilename);
+                    console.log('[FACTURE EMAIL] Historique d\'envoi enregistré pour la facture', id, 'PDF:', safeFilename);
+                } catch (histErr) {
+                    console.error('[FACTURE EMAIL] Erreur lors de l\'enregistrement de l\'historique:', histErr);
+                }
+            } else {
+                console.error('[FACTURE EMAIL] Echec d\'envoi ou pas d\'ID de message retourné:', emailResult);
+            }
+        } catch (err) {
+            console.error('Erreur lors de l’envoi du mail de facture (async) :', err);
+            return c.json({ error: 'Erreur lors de l’envoi du mail de facture.' }, 500);
+        }
+        // Répondre au frontend une fois l'envoi et l'historique terminés
+        console.log('[FACTURE EMAIL] Tous les prérequis sont OK, envoi du mail terminé, historique enregistré.');
+        return c.json({ success: true });
     } catch (e: any) {
         console.error('Error sending facture email:', e);
         return c.json({ error: e.message || 'Erreur lors de l’envoi de la facture' }, 500);
