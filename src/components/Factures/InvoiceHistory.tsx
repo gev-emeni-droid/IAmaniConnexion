@@ -51,7 +51,19 @@ export const InvoiceHistory = ({ refreshKey = 0, onBack, onOpenInvoice, onDownlo
         setLoading(true);
         try {
             const data = await moduleApi.getFactures();
-            setItems(Array.isArray(data) ? data : []);
+            // Pour chaque facture, on récupère l'historique d'envoi si last_sent_email est vide
+            const itemsWithHistory = await Promise.all((Array.isArray(data) ? data : []).map(async (item: any) => {
+                if (!item.last_sent_email) {
+                    try {
+                        const hist = await getFactureHistory(item.id);
+                        return { ...item, facture_history: Array.isArray(hist) ? hist : [] };
+                    } catch {
+                        return { ...item, facture_history: [] };
+                    }
+                }
+                return item;
+            }));
+            setItems(itemsWithHistory);
         } catch (e) {
             console.error(e);
             setItems([]);
@@ -139,7 +151,13 @@ export const InvoiceHistory = ({ refreshKey = 0, onBack, onOpenInvoice, onDownlo
                                     <td className="px-4 py-3 text-sm font-bold text-[var(--text-primary)]">{item.invoice_number || '-'}</td>
                                     <td className="px-4 py-3 text-sm text-[var(--text-primary)]">{item.due_date ? new Date(item.due_date).toLocaleDateString() : new Date(item.created_at).toLocaleDateString()}</td>
                                     <td className="px-4 py-3 text-sm text-[var(--text-primary)]">{item.customer_name || '-'}</td>
-                                    <td className="px-4 py-3 text-sm text-[var(--text-primary)]">{item.last_sent_email || '-'}</td>
+                                    <td className="px-4 py-3 text-sm text-[var(--text-primary)]">
+                                        {item.last_sent_email
+                                            ? item.last_sent_email
+                                            : (item.facture_history && Array.isArray(item.facture_history) && item.facture_history.length > 0
+                                                ? item.facture_history.filter((h:any) => h.action === 'email').sort((a:any,b:any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]?.email || '-'
+                                                : '-')}
+                                    </td>
                                     <td className="px-4 py-3 text-sm text-right font-bold text-[var(--text-primary)]">{toCurrency(Number(item.total_ttc ?? item.amount ?? 0))}</td>
                                     <td className="px-4 py-3 text-sm text-right font-bold text-[var(--text-primary)]">{toCurrency(Number(item.remaining_due ?? 0))}</td>
                                     <td className="px-4 py-3">
