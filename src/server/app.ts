@@ -234,6 +234,9 @@ const ensureFactureColumns = async (db: any) => {
     if (!names.has('crm_contact_id')) {
         await db.prepare('ALTER TABLE facture ADD COLUMN crm_contact_id TEXT').run();
     }
+    if (!names.has('last_sent_email')) {
+        await db.prepare('ALTER TABLE facture ADD COLUMN last_sent_email TEXT').run();
+    }
 };
 
 const ensureCrmContactColumns = async (db: any) => {
@@ -3986,6 +3989,8 @@ app.post('/api/facture/:id/send-email', authMiddleware, moduleAccessMiddleware, 
                     await ensureFactureHistoryTable(db);
                     await db.prepare(`INSERT INTO facture_history (facture_id, client_id, action, email, pdf_filename) VALUES (?, ?, 'email', ?, ?)`)
                         .run(id, user.clientId, recipientEmail, safeFilename);
+                    // Mettre à jour la facture avec le dernier email utilisé
+                    await db.prepare('UPDATE facture SET last_sent_email = ? WHERE id = ?').run(recipientEmail, id);
                     console.log('[FACTURE EMAIL] Historique d\'envoi enregistré pour la facture', id, 'PDF:', safeFilename);
                 } catch (histErr) {
                     console.error('[FACTURE EMAIL] Erreur lors de l\'enregistrement de l\'historique:', histErr);
