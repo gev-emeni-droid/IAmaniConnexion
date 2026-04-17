@@ -11,25 +11,8 @@ const ensureFactureHistoryTable = async (db: any) => {
     )`).run();
 };
 
-// Enregistrement d'une action sur une facture (print/download/email)
-app.post('/api/facture/:id/history', async (c) => {
-    try {
-        const db = localDb;
-        const factureId = c.req.param('id');
-        const { action, email, client_id } = await c.req.json();
-        if (!['print', 'download', 'email'].includes(action)) {
-            return c.json({ error: 'Action non supportée' }, 400);
-        }
-        if (!factureId || !client_id) {
-            return c.json({ error: 'facture_id et client_id requis' }, 400);
-        }
-        await db.prepare(`INSERT OR IGNORE INTO facture_history (facture_id, client_id, action, email) VALUES (?, ?, ?, ?)`)
-            .run(factureId, client_id, action, email || null);
-        return c.json({ success: true });
-    } catch (e: any) {
-        return c.json({ error: e.message }, 500);
-    }
-});
+// ...existing code...
+
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { verify, sign } from 'hono/jwt';
