@@ -5,7 +5,7 @@ export const recordFactureAction = async (factureId: string, clientId: string, a
         body: JSON.stringify({ action, client_id: clientId, email }),
     });
 };
-const API_URL = '';
+const API_URL = '/api';
 
 type ApiFetchOptions = RequestInit & { timeoutMs?: number };
 
