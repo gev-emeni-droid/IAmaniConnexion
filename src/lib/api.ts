@@ -130,7 +130,7 @@ export const moduleApi = {
     getFactures: () => apiFetch('/facture'),
     searchFactureCRMContacts: (q: string) => apiFetch(`/facture/crm-search?q=${encodeURIComponent(q)}`),
     createFacture: (payload: any) => apiFetch('/facture', { method: 'POST', body: JSON.stringify(payload) }),
-    sendFactureEmail: (id: string, payload: any) => apiFetch(`/facture/${id}/send-email`, { method: 'POST', body: JSON.stringify(payload) }),
+    sendFactureEmail: (id: string, payload: any) => apiFetch(`/api/facture/${id}/send-email`, { method: 'POST', body: JSON.stringify(payload) }),
     // Nouvelle version : envoi de facture par email (historique enregistré côté serveur)
     sendFactureEmailServer: (factureId: string, to: string) =>
         apiFetch(`/factures/${factureId}/send`, {
