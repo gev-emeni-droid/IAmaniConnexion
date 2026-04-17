@@ -144,9 +144,11 @@ const Layout = ({ children }: any) => {
         try {
             // For clients/collaborators, we fetch their active modules via the /me/modules endpoint
             const modules = await authApi.getMyModules();
-            setActiveModules(modules.filter((m: any) => m.is_active === 1).map((m: any) => m.module_name));
+            const safeModules = Array.isArray(modules) ? modules : [];
+            setActiveModules(safeModules.filter((m: any) => m.is_active === 1).map((m: any) => m.module_name));
         } catch (e) {
             console.error('Failed to load active modules', e);
+            setActiveModules([]);
         }
     };
 
