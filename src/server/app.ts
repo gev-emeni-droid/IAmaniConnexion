@@ -1,35 +1,7 @@
-// Création de la table d'historique des actions sur les factures
-const ensureFactureHistoryTable = async (db: any) => {
-    await db.prepare(`CREATE TABLE IF NOT EXISTS facture_history (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        facture_id TEXT NOT NULL,
-        client_id TEXT NOT NULL,
-        action TEXT NOT NULL, -- 'email', 'print', 'download'
-        email TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(facture_id, client_id, action, email)
-    )`).run();
-};
 
-// Enregistrement d'une action sur une facture (print/download/email)
-app.post('/api/facture/:id/history', async (c) => {
-    try {
-        const db = localDb;
-        const factureId = c.req.param('id');
-        const { action, email, client_id } = await c.req.json();
-        if (!['print', 'download', 'email'].includes(action)) {
-            return c.json({ error: 'Action non supportée' }, 400);
-        }
-        if (!factureId || !client_id) {
-            return c.json({ error: 'facture_id et client_id requis' }, 400);
-        }
-        await db.prepare(`INSERT OR IGNORE INTO facture_history (facture_id, client_id, action, email) VALUES (?, ?, ?, ?)`)
-            .run(factureId, client_id, action, email || null);
-        return c.json({ success: true });
-    } catch (e: any) {
-        return c.json({ error: e.message }, 500);
-    }
-});
+// ...existing code...
+
+
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { verify, sign } from 'hono/jwt';
@@ -43,6 +15,25 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import * as XLSX from 'xlsx';
 import { PDFParse } from 'pdf-parse';
 import localDb from '../../database.ts';
+
+// Création de la table d'historique des actions sur les factures
+const ensureFactureHistoryTable = async (db: any) => {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS facture_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        facture_id TEXT NOT NULL,
+        client_id TEXT NOT NULL,
+        action TEXT NOT NULL, -- 'email', 'print', 'download'
+        email TEXT,
+        pdf_filename TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(facture_id, client_id, action, email, pdf_filename)
+    )`).run();
+    // Ajout colonne pdf_filename si migration
+    const cols = await db.prepare('PRAGMA table_info(facture_history)').all();
+    if (!cols.some((c:any) => c.name === 'pdf_filename')) {
+        await db.prepare('ALTER TABLE facture_history ADD COLUMN pdf_filename TEXT').run();
+    }
+};
 
 // Load local overrides first, then fallback to .env.
 loadEnv({ path: '.env.local' });
@@ -3870,39 +3861,60 @@ app.post('/api/facture/:id/send-email', authMiddleware, moduleAccessMiddleware, 
         const id = String(c.req.param('id') || '').trim();
         const body = await c.req.json().catch(() => ({} as any));
         const invoice = await db.prepare('SELECT * FROM facture WHERE id = ? AND client_id = ?').get(id, user.clientId);
-        const requestPayload = body?.invoicePayload && typeof body.invoicePayload === 'object' ? body.invoicePayload : {};
-
-        if (!invoice && !Object.keys(requestPayload).length) {
-            return c.json({ error: 'Facture introuvable' }, 404);
+        // Accepte le payload soit dans invoicePayload, soit à la racine du body
+        let requestPayload = {};
+        if (body?.invoicePayload && typeof body.invoicePayload === 'object') {
+            requestPayload = body.invoicePayload;
+        } else {
+            // Si le body contient au moins un champ clé de facture OU les champs d'email minimal, on le prend comme payload
+            const keys = Object.keys(body || {});
+            if (
+                keys.includes('clientName') ||
+                keys.includes('customer_name') ||
+                keys.includes('invoiceNumber') ||
+                keys.includes('totalTtcBrut') ||
+                keys.includes('totalTtc') ||
+                (keys.includes('to') && keys.includes('pdfBase64'))
+            ) {
+                requestPayload = body;
+            }
         }
-
-        const payload = invoice ? (() => {
-            try {
-                return typeof invoice.payload_json === 'string' ? JSON.parse(invoice.payload_json || '{}') : (invoice.payload_json || {});
-            } catch {
-                return {};
-            }
-        })() : requestPayload;
-
-        const settings = invoice ? (() => {
-            try {
-                return typeof invoice.billing_snapshot === 'string' ? JSON.parse(invoice.billing_snapshot || '{}') : (invoice.billing_snapshot || {});
-            } catch {
-                return {};
-            }
-        })() : (requestPayload.billing_snapshot || {});
-
-        const virtualInvoice = invoice || {
-            id,
-            invoice_number: requestPayload.invoiceNumber || id,
-            customer_name: requestPayload.clientName || requestPayload.customer_name || 'Client',
-            amount: Number(requestPayload.totalTtcBrut || requestPayload.totalTtc || 0),
-            due_date: requestPayload.invoiceDate || null,
-            status: String(requestPayload.status || 'pending'),
-            crm_contact_id: requestPayload.crmContactId || requestPayload.crm_contact_id || null,
-            payload_json: JSON.stringify(requestPayload || {}),
-            billing_snapshot: JSON.stringify(requestPayload.billing_snapshot || {}),
-        };
+        let payload, settings, virtualInvoice;
+        const reqPayload: any = requestPayload; // typage any pour accès dynamique
+        if (invoice) {
+            payload = (() => {
+                try {
+                    return typeof invoice.payload_json === 'string' ? JSON.parse(invoice.payload_json || '{}') : (invoice.payload_json || {});
+                } catch {
+                    return {};
+                }
+            })();
+            settings = (() => {
+                try {
+                    return typeof invoice.billing_snapshot === 'string' ? JSON.parse(invoice.billing_snapshot || '{}') : (invoice.billing_snapshot || {});
+                } catch {
+                    return {};
+                }
+            })();
+            virtualInvoice = invoice;
+        } else if (Object.keys(reqPayload).length) {
+            payload = reqPayload;
+            settings = reqPayload.billing_snapshot || {};
+            virtualInvoice = {
+                id,
+                invoice_number: reqPayload.invoiceNumber || id,
+                customer_name: reqPayload.clientName || reqPayload.customer_name || 'Client',
+                amount: Number(reqPayload.totalTtcBrut || reqPayload.totalTtc || 0),
+                due_date: reqPayload.invoiceDate || null,
+                status: String(reqPayload.status || 'pending'),
+                crm_contact_id: reqPayload.crmContactId || reqPayload.crm_contact_id || null,
+                payload_json: JSON.stringify(reqPayload || {}),
+                billing_snapshot: JSON.stringify(reqPayload.billing_snapshot || {}),
+            };
+        } else {
+            console.warn('[FACTURE EMAIL] Blocage: Facture introuvable et payload vide', { id, userId: user.clientId, body });
+            return c.json({ error: 'Facture introuvable et payload vide' }, 404);
+        }
 
         let recipientEmail = String(body?.to || payload?.recipientEmail || '').trim();
         if (!recipientEmail && virtualInvoice.crm_contact_id) {
@@ -3911,19 +3923,23 @@ app.post('/api/facture/:id/send-email', authMiddleware, moduleAccessMiddleware, 
         }
 
         if (!recipientEmail) {
+            console.warn('[FACTURE EMAIL] Blocage: Adresse email du destinataire manquante', { id, userId: user.clientId, body, payload });
             return c.json({ error: 'Adresse email du destinataire manquante.' }, 400);
         }
 
         if (!isValidEmailAddress(recipientEmail)) {
+            console.warn('[FACTURE EMAIL] Blocage: Adresse email invalide', { recipientEmail });
             return c.json({ error: 'Adresse email invalide.' }, 400);
         }
 
         const resendKey = c.env?.RESEND_API_KEY || process.env.RESEND_API_KEY;
         if (!resendKey) {
+            console.warn('[FACTURE EMAIL] Blocage: RESEND_API_KEY manquante sur le serveur');
             return c.json({ error: 'RESEND_API_KEY manquante sur le serveur.' }, 500);
         }
 
         // Répondre immédiatement au frontend
+        console.log('[FACTURE EMAIL] Tous les prérequis sont OK, envoi du mail en tâche de fond...');
         c.json({ success: true });
 
         // Envoi du mail en tâche de fond
@@ -3934,7 +3950,14 @@ app.post('/api/facture/:id/send-email', authMiddleware, moduleAccessMiddleware, 
                     await db.prepare('UPDATE facture SET payload_json = ? WHERE id = ? AND client_id = ?').run(JSON.stringify(nextPayload), id, user.clientId);
                 }
 
-                const establishmentName = String(settings.company_name || 'Votre établissement').trim() || 'Votre établissement';
+                // Récupération intelligente du nom d'établissement
+                let establishmentName = String(settings.company_name || '').trim();
+                if (!establishmentName && user && user.clientId) {
+                    // Aller chercher dans la table clients si non présent dans settings
+                    const clientRow = await db.prepare('SELECT company_name, name FROM clients WHERE id = ?').get(user.clientId) as any;
+                    establishmentName = String(clientRow?.company_name || clientRow?.name || 'Votre établissement').trim();
+                }
+                if (!establishmentName) establishmentName = 'Votre établissement';
                 // Correction de l'expression régulière pour supprimer les caractères interdits
                 const senderLabel = establishmentName.replace(/[<>"\n]/g, '').trim() || 'Votre établissement';
                 const displayDate = formatFactureEmailDate(nextPayload.invoiceDate || virtualInvoice.due_date);
@@ -3961,12 +3984,12 @@ app.post('/api/facture/:id/send-email', authMiddleware, moduleAccessMiddleware, 
                 });
                 console.log('[FACTURE EMAIL] Résultat envoi Resend:', JSON.stringify(emailResult));
                 // Enregistrement dans l'historique d'envoi si succès
-                if (emailResult && emailResult.id) {
+                if (emailResult && typeof emailResult === 'object' && 'id' in emailResult && emailResult.id) {
                     try {
                         await ensureFactureHistoryTable(db);
-                        await db.prepare(`INSERT OR IGNORE INTO facture_history (facture_id, client_id, action, email) VALUES (?, ?, 'email', ?)`)
-                            .run(id, user.clientId, recipientEmail);
-                        console.log('[FACTURE EMAIL] Historique d\'envoi enregistré pour la facture', id);
+                        await db.prepare(`INSERT INTO facture_history (facture_id, client_id, action, email, pdf_filename) VALUES (?, ?, 'email', ?, ?)`)
+                            .run(id, user.clientId, recipientEmail, safeFilename);
+                        console.log('[FACTURE EMAIL] Historique d\'envoi enregistré pour la facture', id, 'PDF:', safeFilename);
                     } catch (histErr) {
                         console.error('[FACTURE EMAIL] Erreur lors de l\'enregistrement de l\'historique:', histErr);
                     }

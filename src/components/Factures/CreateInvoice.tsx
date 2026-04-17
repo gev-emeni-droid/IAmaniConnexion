@@ -2,7 +2,7 @@ import React from 'react';
 import { toPng } from 'html-to-image';
 import { jsPDF } from 'jspdf';
 import { Download, History, Mail, Plus, Printer, RotateCcw, Send, Settings, Trash2 } from 'lucide-react';
-import { moduleApi } from '../../lib/api';
+import { moduleApi, recordFactureAction } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 import { BillingSettingsModal } from './BillingSettingsModal';
 
@@ -654,7 +654,7 @@ body { margin: 0; padding: 0; background: #ffffff; }
         // Enregistrement action print
         try {
             if (saved.id && user?.clientId) {
-                await moduleApi.recordFactureAction(String(saved.id), String(user.clientId), 'print');
+                await recordFactureAction(String(saved.id), String(user.clientId), 'print');
             }
         } catch (e) {
             // Optionnel : afficher une erreur ou ignorer
@@ -750,7 +750,7 @@ body { margin: 0; padding: 0; background: #ffffff; }
         // Enregistrement action download
         try {
             if (saved.id && user?.clientId) {
-                await moduleApi.recordFactureAction(String(saved.id), String(user.clientId), 'download');
+                await recordFactureAction(String(saved.id), String(user.clientId), 'download');
             }
         } catch (e) {
             // Optionnel : afficher une erreur ou ignorer
@@ -789,7 +789,7 @@ body { margin: 0; padding: 0; background: #ffffff; }
             await saveCurrentInvoice(payload);
             // Enregistrement action email dans l'historique
             if (invoiceId && user?.clientId) {
-                await moduleApi.recordFactureAction(invoiceId, String(user.clientId), 'email', email);
+                await recordFactureAction(invoiceId, String(user.clientId), 'email', email);
             }
             // Rafraîchir l'historique si callback fourni
             if (typeof onInvoiceSaved === 'function') onInvoiceSaved();

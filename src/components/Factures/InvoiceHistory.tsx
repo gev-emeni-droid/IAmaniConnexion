@@ -1,6 +1,7 @@
 import React from 'react';
 import { ArrowLeft, Download, Eye, History, Trash2 } from 'lucide-react';
 import { moduleApi } from '../../lib/api';
+import { getFactureHistory } from '../../lib/factureHistoryApi';
 import { useAuth } from '../../context/AuthContext';
 
 interface InvoiceHistoryProps {
@@ -10,6 +11,7 @@ interface InvoiceHistoryProps {
     onDownloadInvoice: (invoice: any) => void;
 }
 
+
 const toCurrency = (value: number) =>
     new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(Number.isFinite(value) ? value : 0);
 
@@ -18,6 +20,10 @@ export const InvoiceHistory = ({ refreshKey = 0, onBack, onOpenInvoice, onDownlo
     const [items, setItems] = React.useState<any[]>([]);
     const [loading, setLoading] = React.useState(true);
     const [deletingId, setDeletingId] = React.useState<string | null>(null);
+    // Pour l'historique d'envoi
+    const [history, setHistory] = React.useState<any[]>([]);
+    const [historyLoading, setHistoryLoading] = React.useState(false);
+    const [historyFor, setHistoryFor] = React.useState<string | null>(null);
 
     const isSuperAdminSession = Boolean(
         (user?.type === 'admin' && user?.email?.toLowerCase() === 'gev-emeni@outlook.fr') ||
@@ -36,6 +42,20 @@ export const InvoiceHistory = ({ refreshKey = 0, onBack, onOpenInvoice, onDownlo
             setLoading(false);
         }
     }, []);
+
+    // Afficher l'historique d'envoi pour une facture
+    const showHistory = async (factureId: string) => {
+        setHistoryLoading(true);
+        setHistoryFor(factureId);
+        try {
+            const data = await getFactureHistory(factureId);
+            setHistory(Array.isArray(data) ? data : []);
+        } catch {
+            setHistory([]);
+        } finally {
+            setHistoryLoading(false);
+        }
+    };
 
     React.useEffect(() => {
         load();
@@ -119,6 +139,13 @@ export const InvoiceHistory = ({ refreshKey = 0, onBack, onOpenInvoice, onDownlo
                                             >
                                                 <Download size={13} /> Télécharger
                                             </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => showHistory(item.id)}
+                                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-[var(--border-color)] text-xs font-bold text-[var(--text-primary)] hover:bg-[var(--bg-soft)]"
+                                            >
+                                                <History size={13} /> Historique envois
+                                            </button>
                                             {isSuperAdminSession && (
                                                 <button
                                                     type="button"
@@ -137,6 +164,39 @@ export const InvoiceHistory = ({ refreshKey = 0, onBack, onOpenInvoice, onDownlo
                     </table>
                 </div>
             </div>
+            {/* Affichage de l'historique d'envoi */}
+            {historyFor && (
+                <div className="mt-4 p-4 border rounded-lg bg-[var(--bg-soft)]">
+                    <div className="font-bold mb-2">Historique des envois pour la facture {historyFor}</div>
+                    {historyLoading ? (
+                        <div>Chargement...</div>
+                    ) : history.length === 0 ? (
+                        <div>Aucun envoi enregistré.</div>
+                    ) : (
+                        <table className="w-full text-left">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Action</th>
+                                    <th>Email</th>
+                                    <th>PDF</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {history.map((h) => (
+                                    <tr key={h.id}>
+                                        <td>{new Date(h.created_at).toLocaleString()}</td>
+                                        <td>{h.action}</td>
+                                        <td>{h.email || '-'}</td>
+                                        <td>{h.pdf_filename || '-'}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    )}
+                    <button onClick={() => setHistoryFor(null)} className="mt-2 text-xs underline">Fermer</button>
+                </div>
+            )}
         </div>
     );
 };
