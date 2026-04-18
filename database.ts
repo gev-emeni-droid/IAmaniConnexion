@@ -1,16 +1,3 @@
-// Migration : documents propres au client (hors privatisation)
-try {
-    db.exec(`CREATE TABLE IF NOT EXISTS client_documents (
-        id TEXT PRIMARY KEY,
-        client_id TEXT NOT NULL,
-        file_name TEXT NOT NULL,
-        mime_type TEXT,
-        file_size INTEGER,
-        storage_key TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
-    )`);
-} catch (e) {}
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
@@ -31,13 +18,6 @@ const dbPath = path.join(process.cwd(), 'database.sqlite');
 const db = new Database(dbPath);
 
 // Migrations for existing tables (run before schema to ensure columns exist for indexes)
-// Ajout des colonnes pour l'envoi de facture par email
-try {
-    db.prepare('ALTER TABLE facture ADD COLUMN last_sent_email TEXT').run();
-} catch (e) {}
-try {
-    db.prepare('ALTER TABLE facture ADD COLUMN last_sent_at DATETIME').run();
-} catch (e) {}
 try {
     db.prepare('ALTER TABLE evenementiel ADD COLUMN calendar_id TEXT').run();
 } catch (e) {}
@@ -80,6 +60,20 @@ try {
 
 try {
     db.prepare('ALTER TABLE collaborators ADD COLUMN modules_access TEXT DEFAULT "[]"').run();
+} catch (e) {}
+
+// Migration : documents propres au client (hors privatisation)
+try {
+    db.exec(`CREATE TABLE IF NOT EXISTS client_documents (
+        id TEXT PRIMARY KEY,
+        client_id TEXT NOT NULL,
+        file_name TEXT NOT NULL,
+        mime_type TEXT,
+        file_size INTEGER,
+        storage_key TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+    )`);
 } catch (e) {}
 
 try {
@@ -198,6 +192,7 @@ try {
     db.prepare('UPDATE collaborators SET modules_access = "[]" WHERE modules_access IS NULL OR TRIM(modules_access) = ""').run();
 } catch (e) {}
 
+//
 // Initialize database with schema
 const schema = fs.readFileSync(path.join(process.cwd(), 'schema.sql'), 'utf8');
 db.exec(schema);
@@ -216,7 +211,6 @@ if (!existingAdmin) {
 }
 
 try {
-        db.prepare('UPDATE admins SET username = ? WHERE email = ? AND (username IS NULL OR TRIM(username) = "")').run('gev-emeni', superAdminEmail);
+    db.prepare('UPDATE admins SET username = ? WHERE email = ? AND (username IS NULL OR TRIM(username) = "")').run('gev-emeni', superAdminEmail);
 } catch (e) {}
-
 export default db as unknown as DatabaseInstance;
