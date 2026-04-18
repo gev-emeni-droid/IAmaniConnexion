@@ -584,18 +584,22 @@ const sendSupportNotification = async (c: any, opts: { to: string; senderName: s
     // Génère le lien vers le dashboard du client concerné
     const baseUrl = process.env.FRONTEND_URL || 'https://app.l-iamani.com';
     const dashboardUrl = opts.clientId ? `${baseUrl}/dashboard/${opts.clientId}/support` : `${baseUrl}/support`;
+    // Déterminer l'expéditeur et la signature
+    const isSuperAdmin = (c.get('user')?.email || '').toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase();
+    const senderLabel = isSuperAdmin ? "L'IAmani" : (opts.companyName || "Votre établissement");
+    const signature = isSuperAdmin ? "L'équipe L'IAmani" : (opts.companyName || "Votre établissement");
     await resend.emails.send({
-        from: "L'IAmani <notification@l-iamani.com>",
+        from: `${senderLabel} <notification@l-iamani.com>`,
         to: opts.to,
-        subject: `Réponse du support L'IAmani - ${opts.companyName}`,
+        subject: `Réponse du support ${senderLabel} - ${opts.companyName}`,
         html: `
             <div style="font-family: sans-serif; padding: 24px; color: #111; font-size: 16px;">
                 <p>Bonjour,</p>
                 <p><b>${opts.companyName}</b></p>
-                <p>Vous venez de recevoir une réponse du support L'IAmani.<br>
+                <p>Vous venez de recevoir une réponse du support ${senderLabel}.<br>
                 Cliquez sur le lien suivant pour la visualiser&nbsp;:</p>
                 <p style="margin: 18px 0;"><a href="${dashboardUrl}" style="background:#2f9e9e;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;font-weight:bold;">Voir la réponse</a></p>
-                <p>Cordialement,<br>L'équipe L'IAmani</p>
+                <p>Cordialement,<br>${signature}</p>
             </div>
         `
     });
@@ -1580,7 +1584,7 @@ app.post('/api/admin/clients/:id/reset-password', authMiddleware, superAdminOnly
     if (resendKey) {
         const resend = new Resend(resendKey);
         await resend.emails.send({
-            from: "L'IAmani <notification@l-iamani.com>",
+            from: `${clientName} <notification@l-iamani.com>`,
             to: client.email,
             subject: "Réinitialisation de votre mot de passe L'IAmani",
             html: `
@@ -2482,7 +2486,8 @@ app.post('/api/evenementiel/notify-update', authMiddleware, moduleAccessMiddlewa
         }
 
         const client = await db.prepare('SELECT name FROM clients WHERE id = ?').get(clientId) as any;
-        const clientName = client?.name || 'Client';
+        const clientFull = await db.prepare('SELECT company_name, name FROM clients WHERE id = ?').get(clientId) as any;
+        const clientName = clientFull?.company_name || clientFull?.name || 'Client';
         const monthName = [
             'janvier', 'fevrier', 'mars', 'avril', 'mai', 'juin',
             'juillet', 'aout', 'septembre', 'octobre', 'novembre', 'decembre'
@@ -2498,7 +2503,7 @@ app.post('/api/evenementiel/notify-update', authMiddleware, moduleAccessMiddlewa
         for (const recipient of recipients) {
             const firstName = recipient.first_name || 'collaborateur';
             await resend.emails.send({
-                from: "L'IAmani <notification@l-iamani.com>",
+                from: `${clientName} <notification@l-iamani.com>`,
                 to: recipient.email,
                 subject: `📅 Mise à jour du calendrier - ${clientName}`,
                 html: `
@@ -2507,6 +2512,7 @@ app.post('/api/evenementiel/notify-update', authMiddleware, moduleAccessMiddlewa
                         <p>Bonjour ${firstName},</p>
                         <p>Le calendrier des événements pour <strong>${monthName} ${calendar.year}</strong> a été mis à jour.</p>
                         <p>Vous pouvez le consulter ici : <a href="${platformLink}">${platformLink}</a></p>
+                        <p style="margin-top:24px;">Cordialement,<br>${clientName}</p>
                     </div>
                 `
             });

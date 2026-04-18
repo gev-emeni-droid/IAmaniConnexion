@@ -1,0 +1,8 @@
+name = "iamani-backend"
+main = "src/server/worker.ts"
+compatibility_date = "2026-04-18"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "iamanidata"
+database_id = "052b6fb1-af0c-408c-bc24-0ddbb595246f"
