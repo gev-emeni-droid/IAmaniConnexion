@@ -2,7 +2,7 @@ import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import fs from 'fs';
-import { getRequestListener } from '@hono/node-server';
+// import { getRequestListener } from '@hono/node-server';
 import { config as loadEnv } from 'dotenv';
 import app from './src/server/app.ts';
 
@@ -13,7 +13,7 @@ loadEnv();
 async function startServer() {
     const server = express();
     const PORT = 3000;
-    const requestListener = getRequestListener(app.fetch);
+    // const requestListener = getRequestListener(app.fetch);
     
     // Simple health check for Express
     server.get('/express-health', (req, res) => {

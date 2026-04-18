@@ -4365,14 +4365,6 @@ app.post('/api/factures/:id/send', authMiddleware, async (c) => {
 
 
 // Compatible ES module/tsx/Windows : démarrage du serveur si exécuté directement
-if (
-    (typeof process !== 'undefined' && process.argv &&
-        (process.argv[1]?.endsWith('app.ts') || process.argv[1]?.endsWith('app.js')))
-) {
-    import('@hono/node-server').then(({ serve }) => {
-        serve({ fetch: app.fetch, port: 3000 });
-        console.log('Hono server listening on http://localhost:3000');
-    });
-}
+
 
 export default app;
