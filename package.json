@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "tsx server.ts",
     "start": "tsx src/server/app.ts",
-    "build": "vite build",
+    "build": "vite build && npm run postbuild",
+    "postbuild": "cp -r functions dist/",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit"
