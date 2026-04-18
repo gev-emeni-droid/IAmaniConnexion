@@ -1,5 +1,5 @@
+
 name = "iamani-backend"
-main = "src/server/worker.ts"
 compatibility_date = "2026-04-18"
 
 [[d1_databases]]
