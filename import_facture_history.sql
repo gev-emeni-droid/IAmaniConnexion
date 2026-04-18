@@ -1,0 +1,9 @@
+-- INSERTS facture_history (7 colonnes)
+INSERT INTO facture_history VALUES(1,'96a958b0-2c46-469b-b672-de0d9dcae3c8','c7317f37','email','gev-emeni@outlook.fr','2026-04-17 13:12:26','BRAS-F37-202604-0002.pdf');
+INSERT INTO facture_history VALUES(2,'5bdcee93-86f5-40f3-a4e1-c15ad80e262d','c7317f37','email','soniadaouadi@outlook.fr','2026-04-17 13:20:41','CLNT-202604-0001.pdf');
+INSERT INTO facture_history VALUES(3,'03cdec85-efb6-49e7-ad59-07ec22a10341','c7317f37','email','gev-emeni@outlook.fr','2026-04-17 13:24:15','CLNT-202604-0001.pdf');
+INSERT INTO facture_history VALUES(4,'f66e2c3a-6499-46c0-81f5-63965f8681b2','c7317f37','email','gev-emeni@outlook.fr','2026-04-17 13:28:10','BRAS-202604-0001.pdf');
+INSERT INTO facture_history VALUES(5,'b73d3aee-7d4c-4bac-97df-c873ae25b7e4','c7317f37','email','gev-emeni@outlook.fr','2026-04-17 13:35:20','BRAS-202604-0002.pdf');
+INSERT INTO facture_history VALUES(6,'caff68b8-d678-4bd6-b1f4-92462a19824a','c7317f37','email','soniadaouadi@outlook.fr','2026-04-17 13:35:42','BRAS-202604-0003.pdf');
+INSERT INTO facture_history VALUES(7,'8c6e83e8-c7c0-48ec-be9b-029c3b362e9f','c7317f37','email','soniadaouadi@outlook.fr','2026-04-17 13:39:26','BRAS-202604-0004.pdf');
+INSERT INTO facture_history VALUES(8,'9b2e2864-3ea8-4959-acb7-32300c4e5db4','c7317f37','email','gev-emeni@outlook.fr','2026-04-17 13:48:34','BRAS-202604-0005.pdf');
