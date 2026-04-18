@@ -719,6 +719,8 @@ app.post('/api/support/upload', authMiddleware, async (c) => {
 
 const loginHandler = async (c: any) => {
     try {
+        // DEBUG: Affiche le contenu de c.env pour diagnostiquer le binding D1 sur Cloudflare Pages
+        console.log('DEBUG Cloudflare Pages c.env:', JSON.stringify(c.env));
         const { identifier, email: emailCompat, password } = await c.req.json();
         // Accept both 'identifier' (new) and 'email' (legacy compat)
         const login = (identifier || emailCompat || '').trim();
