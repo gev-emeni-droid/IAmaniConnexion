@@ -7,31 +7,11 @@ import { cors } from 'hono/cors';
 import { verify, sign } from 'hono/jwt';
 import bcrypt from 'bcryptjs';
 import { Resend } from 'resend';
-import crypto from 'crypto';
-import fs from 'fs';
-import path from 'path';
-import { config as loadEnv } from 'dotenv';
-import { serveStatic } from '@hono/node-server/serve-static';
-import * as XLSX from 'xlsx';
-import { PDFParse } from 'pdf-parse';
-import localDb from '../../database.ts';
 
-// Création de la table d'historique des actions sur les factures
-const ensureFactureHistoryTable = async (db: any) => {
-    await db.prepare(`CREATE TABLE IF NOT EXISTS facture_history (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        facture_id TEXT NOT NULL,
-        client_id TEXT NOT NULL,
-        action TEXT NOT NULL, -- 'email', 'print', 'download'
-        email TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(facture_id, client_id, action, email)
-    )`).run();
-};
 
-// Load local overrides first, then fallback to .env.
-loadEnv({ path: '.env.local' });
-loadEnv();
+
+
+
 
 // Type pour D1Database si les types Cloudflare ne sont pas chargés
 interface D1Database {
@@ -58,24 +38,9 @@ app.onError((err, c) => {
 
 const DEFAULT_JWT_SECRET = 'super-secret-key';
 const SUPER_ADMIN_EMAIL = 'gev-emeni@outlook.fr';
-const CRM_AUTO_PHONE_PREFIX = '__AUTO_NOPHONE__:';
-const uploadsRoot = path.join(process.cwd(), 'uploads');
-const logosRoot = path.join(uploadsRoot, 'logos');
-const supportRoot = path.join(uploadsRoot, 'support');
 
-// Ensure upload folders exist on boot.
-if (!fs.existsSync(logosRoot)) {
-    fs.mkdirSync(logosRoot, { recursive: true });
-}
-if (!fs.existsSync(supportRoot)) {
-    fs.mkdirSync(supportRoot, { recursive: true });
-}
 
-app.use('/api/*', cors());
-app.use('/uploads/*', serveStatic({
-    root: './uploads',
-    rewriteRequestPath: (p: string) => p.replace(/^\/uploads/, '')
-} as any));
+
 
 app.use('*', async (c, next) => {
     console.log(`[Hono Request] ${c.req.method} ${c.req.path}`);
@@ -83,11 +48,9 @@ app.use('*', async (c, next) => {
     console.log(`[Hono Response] ${c.req.method} ${c.req.path} -> ${c.res.status}`);
 });
 
-// Helper to get DB (D1 or Local)
+// Helper to get DB (D1 only, compatible Cloudflare Pages)
 const getDb = (c: any) => {
     if (c.env?.DB) {
-        // Wrapper for D1 to match better-sqlite3 interface for simplicity in this refactor
-        // In a real production app, we'd use a more robust abstraction or Drizzle ORM
         return {
             prepare: (sql: string) => ({
                 get: async (...params: any[]) => (await c.env.DB.prepare(sql).bind(...params).first()),
@@ -96,11 +59,10 @@ const getDb = (c: any) => {
             })
         };
     }
-    return localDb;
+    throw new Error('D1 Database not available in this environment.');
 };
 
-// Initialisation de la table d'historique au démarrage
-ensureFactureHistoryTable(localDb).catch(console.error);
+
 const resolveClientId = (user: any, bodyClientId?: string) => {
     if (user.type === 'admin') {
         return bodyClientId || null;
