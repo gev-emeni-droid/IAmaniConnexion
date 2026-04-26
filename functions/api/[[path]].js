@@ -572,6 +572,26 @@ app.post('/evenementiel/calendars', async (c) => {
     } catch (e) { return c.json({ error: 'Calendrier existant ou erreur' }, 500); }
 });
 
+app.patch('/evenementiel/calendars/:id/archive', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user) return c.json({ error: 'Auth' }, 401);
+        const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
+        await c.env.DB.prepare('UPDATE evenementiel_calendars SET status = "CLOSED" WHERE id = ? AND client_id = ?').bind(c.req.param('id'), ownerId).run();
+        return c.json({ success: true });
+    } catch (e) { return c.json({ error: 'Erreur Archive' }, 500); }
+});
+
+app.delete('/evenementiel/calendars/:id', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user) return c.json({ error: 'Auth' }, 401);
+        const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
+        await c.env.DB.prepare('DELETE FROM evenementiel_calendars WHERE id = ? AND client_id = ?').bind(c.req.param('id'), ownerId).run();
+        return c.json({ success: true });
+    } catch (e) { return c.json({ error: 'Erreur Suppression' }, 500); }
+});
+
 app.get('/evenementiel/calendars/:id/events', async (c) => {
     try {
         const user = await getUserFromReq(c);
@@ -716,6 +736,33 @@ app.delete('/facture/:id', async (c) => {
         const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
         await c.env.DB.prepare('DELETE FROM facture WHERE id=? AND client_id=?').bind(c.req.param('id'), ownerId).run();
         return c.json({ success: true });
+    } catch (e) { return c.json({ error: 'Erreur' }, 500); }
+});
+
+app.post('/facture/:id/send-email', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user) return c.json({ error: 'Auth' }, 401);
+        const body = await c.req.json();
+        const id = c.req.param('id');
+        
+        // Simuler ou envoyer via Mailchannels
+        const mailRes = await fetch("https://api.mailchannels.net/tx/v1/send", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+                personalizations: [{ to: [{ email: body.to }] }],
+                from: { email: "facturation@iamani.fr", name: "IAmani Billing" },
+                subject: `Facture ${body.invoicePayload?.invoice_number || id}`,
+                content: [{ type: "text/html", value: `<p>Veuillez trouver ci-joint votre facture.</p>` }]
+            })
+        });
+
+        if (mailRes.ok) {
+            await c.env.DB.prepare('UPDATE facture SET last_sent_at = CURRENT_TIMESTAMP, last_sent_email = ? WHERE id = ?').bind(body.to, id).run();
+            return c.json({ success: true });
+        }
+        return c.json({ error: 'Erreur envoi' }, 500);
     } catch (e) { return c.json({ error: 'Erreur' }, 500); }
 });
 
