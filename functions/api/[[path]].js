@@ -268,8 +268,14 @@ app.get('/evenementiel', async (c) => {
         const user = await getUserFromReq(c);
         if (!user) return c.json([]);
         const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
-        const rows = await safeQuery(c, `SELECT ${eventCols} FROM evenementiel WHERE client_id = ? ORDER BY start_time DESC`, [ownerId]);
-        return c.json(rows.map(mapEvent));
+        const rows = await safeQuery(c, `
+            SELECT e.*, n.note_text 
+            FROM evenementiel e 
+            LEFT JOIN event_notes n ON e.id = n.event_id 
+            WHERE e.client_id = ? 
+            ORDER BY e.start_time DESC
+        `, [ownerId]);
+        return c.json(rows.map(mapEvent) || []);
     } catch (e) { return c.json([]); }
 });
 
@@ -324,9 +330,16 @@ app.get('/evenementiel/config', async (c) => {
         const user = await getUserFromReq(c);
         if (!user) return c.json({});
         const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
-        const row = await safeFirst(c, 'SELECT * FROM evenementiel_config WHERE client_id = ?', [ownerId]);
-        return c.json(row || { track_taken_by: 0, allowed_taker_employee_ids: "[]", notify_recipient_employee_ids: "[]" });
-    } catch (e) { return c.json({}); }
+        const config = await safeFirst(c, 'SELECT * FROM evenementiel_config WHERE client_id = ?', [ownerId]);
+        const staff = await safeQuery(c, 'SELECT * FROM evenementiel_staff_types WHERE client_id = ?', [ownerId]);
+        const spaces = await safeQuery(c, 'SELECT * FROM evenementiel_spaces WHERE client_id = ?', [ownerId]);
+        
+        return c.json({
+            ...(config || { track_taken_by: 0, allowed_taker_employee_ids: "[]", notify_recipient_employee_ids: "[]" }),
+            authorized_staff_categories: staff,
+            spaces: spaces
+        });
+    } catch (e) { return c.json({ authorized_staff_categories: [], spaces: [] }); }
 });
 
 app.put('/evenementiel/config', async (c) => {
@@ -369,7 +382,13 @@ app.get('/evenementiel/calendars/:id/events', async (c) => {
         const user = await getUserFromReq(c);
         if (!user) return c.json([]);
         const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
-        const rows = await safeQuery(c, `SELECT ${eventCols} FROM evenementiel WHERE calendar_id = ? AND client_id = ?`, [c.req.param('id'), ownerId]);
+        // Jointure avec event_notes pour ramener note_text
+        const rows = await safeQuery(c, `
+            SELECT e.*, n.note_text 
+            FROM evenementiel e 
+            LEFT JOIN event_notes n ON e.id = n.event_id 
+            WHERE e.calendar_id = ? AND e.client_id = ?
+        `, [c.req.param('id'), ownerId]);
         return c.json(rows.map(mapEvent));
     } catch (e) { return c.json([]); }
 });
@@ -480,7 +499,7 @@ app.get('/facture', async (c) => {
         if (!user) return c.json([]);
         const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
         const rows = await safeQuery(c, `SELECT ${factureCols} FROM facture WHERE client_id = ? ORDER BY created_at DESC`, [ownerId]);
-        return c.json(rows.map(mapFacture));
+        return c.json(rows.map(mapFacture) || []);
     } catch (e) { return c.json([]); }
 });
 
