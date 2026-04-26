@@ -1,4 +1,0 @@
--- INSERTS event_notes (6 colonnes)
-INSERT INTO event_notes VALUES('26cad262','f6cf1fd2','c7317f37','PAS D''HOTESSE','2026-04-14 17:02:35','2026-04-14 19:58:27');
-INSERT INTO event_notes VALUES('16694abe','c5b1dc69','c7317f37','PAS D''HÔTESSES','2026-04-15 13:47:37','2026-04-15 13:47:37');
-INSERT INTO event_notes VALUES('dbce0337','2e07b20e','c7317f37','tu m''a fais un chargement de données via mon compte admin dans gestion clients, pour ajouter les employés de mes client, ou je vais lui donner un excel ou pdf et il vas recuperer obligatoirement nom prenom poste, et pas obligatoire, mail, numero de telephone,; je veux que tu me fasse exactement la meme chose, avec un tableau excel ou pdf pour "evenementiel" je vais devoir donner une liste avec "date du calendrier" (donc mois + année)"Nom...','2026-04-15 13:47:37','2026-04-15 13:47:37');

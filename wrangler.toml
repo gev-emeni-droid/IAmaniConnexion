@@ -1,6 +1,5 @@
-
-name = "iamani-backend"
-compatibility_date = "2026-04-18"
+name = "iamani"
+pages_build_output_dir = "dist"
 
 [[d1_databases]]
 binding = "DB"

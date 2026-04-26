@@ -1127,7 +1127,7 @@ const AdminClientsView = () => {
                                         {logoUrl ? (
                                             <img
                                                 src={logoUrl}
-                                                alt={client.company_name || client.name}
+                                                alt={client.company_name || client.name || 'Client'}
                                                 className="w-full h-full object-contain"
                                                 onError={e => (e.currentTarget as HTMLImageElement).style.display = 'none'}
                                             />
@@ -1135,9 +1135,8 @@ const AdminClientsView = () => {
                                             <ShieldCheck className="text-black opacity-60" size={36} />
                                         )}
                                     </div>
-                                    <h2 className="text-lg font-bold text-white text-center truncate w-full mb-1">{client.company_name || client.name}</h2>
+                                    <h2 className="text-lg font-bold text-white text-center truncate w-full mb-1">{client.company_name || client.name || 'Client Anonyme'}</h2>
                                     <p className="text-xs text-gray-400 text-center w-full truncate mb-2">{client.email}</p>
-                                    <span className="text-[11px] font-mono text-gray-500 bg-white/5 rounded px-2 py-0.5 mb-2">{client.username}</span>
                                 </Link>
                                 <div className="flex gap-2 mt-2 w-full">
                                     <button
