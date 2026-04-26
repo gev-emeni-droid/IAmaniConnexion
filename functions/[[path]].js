@@ -194,4 +194,4 @@ app.get('/employes', async (c) => {
     return c.json((await safeQuery(c, `SELECT ${employeCols} FROM employes WHERE client_id = ? ORDER BY last_name, first_name`, [ownerId])).map(r => ({ ...r, hire_date: toISO(r.hire_date) })));
 });
 
-export const onRequest = handle(app);
+export default handle(app);
