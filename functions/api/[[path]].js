@@ -71,6 +71,7 @@ const mapFacture = (row) => ({ ...row, due_date: toISO(row.due_date), created_at
 const mapEvent = (row) => ({ ...row, start_time: toISO(row.start_time), end_time: toISO(row.end_time), created_at: toISO(row.created_at), documents: typeof row.documents === 'string' ? JSON.parse(row.documents || '[]') : (row.documents || []) });
 const mapCrm = (row) => ({ ...row, created_at: toISO(row.created_at), updated_at: toISO(row.updated_at) });
 const mapCollab = (row) => ({ ...row, created_at: toISO(row.created_at), modules_access: typeof row.modules_access === 'string' ? JSON.parse(row.modules_access || '[]') : (row.modules_access || []) });
+const mapFactureHistory = (row) => ({ ...row, created_at: toISO(row.created_at) });
 
 const getSecret = (c) => (c.env.JWT_SECRET && c.env.JWT_SECRET !== '') ? c.env.JWT_SECRET : 'iamani_stable_secret_2026';
 
@@ -169,6 +170,14 @@ app.get('/facture', async (c) => {
     const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
     return c.json((await safeQuery(c, `SELECT ${factureCols} FROM facture WHERE client_id = ? ORDER BY created_at DESC`, [ownerId])).map(mapFacture));
 });
+
+app.get('/facture/:id/history', async (c) => {
+    const user = await getUserFromReq(c);
+    if (!user) return c.json([]);
+    const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
+    const rows = await safeQuery(c, 'SELECT * FROM facture_history WHERE facture_id = ? AND client_id = ?', [c.req.param('id'), ownerId]);
+    return c.json(rows.map(mapFactureHistory) || []);
+});
 app.get('/crm/contacts', async (c) => {
     const user = await getUserFromReq(c);
     if (!user) return c.json([]);
@@ -180,6 +189,28 @@ app.get('/evenementiel', async (c) => {
     if (!user) return c.json([]);
     const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
     return c.json((await safeQuery(c, `SELECT ${eventCols} FROM evenementiel WHERE client_id = ? ORDER BY start_time DESC`, [ownerId])).map(mapEvent));
+});
+
+app.put('/evenementiel/:id', async (c) => {
+    const user = await getUserFromReq(c);
+    if (!user) return c.json({ error: 'Auth' }, 401);
+    const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
+    const id = c.req.param('id');
+    const body = await c.req.json();
+    
+    // Simplification : On met à jour les champs les plus communs
+    await c.env.DB.prepare(`
+        UPDATE evenementiel SET 
+        type = ?, phone = ?, email = ?, address = ?, start_time = ?, end_time = ?, 
+        num_people = ?, first_name = ?, last_name = ?, company_name = ?, organizer_name = ?
+        WHERE id = ? AND client_id = ?
+    `).bind(
+        body.type, body.phone, body.email, body.address, body.start_time, body.end_time,
+        body.num_people, body.first_name, body.last_name, body.company_name, body.organizer_name,
+        id, ownerId
+    ).run();
+    
+    return c.json({ success: true });
 });
 app.get('/evenementiel/calendars', async (c) => {
     const user = await getUserFromReq(c);
@@ -203,7 +234,25 @@ app.get('/employes/posts', async (c) => {
     return c.json(rows || []);
 });
 
+app.get('/crm/contacts/:id', async (c) => {
+    const user = await getUserFromReq(c);
+    if (!user) return c.json({ error: 'Auth' }, 401);
+    const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
+    const row = await safeFirst(c, `SELECT ${crmCols} FROM crm_contacts WHERE id = ? AND client_id = ?`, [c.req.param('id'), ownerId]);
+    return row ? c.json(mapCrm(row)) : c.json({ error: 'Contact introuvable' }, 404);
+});
+
+app.get('/crm/contacts/:id/notes', async (c) => c.json([]));
+app.get('/crm/contacts/:id/history', async (c) => c.json([]));
+
 // --- DIVERS / SETTINGS ---
+app.get('/evenementiel/staff-mappings', async (c) => {
+    const user = await getUserFromReq(c);
+    if (!user) return c.json([]);
+    const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
+    const rows = await safeQuery(c, 'SELECT * FROM staff_category_mapping WHERE client_id = ?', [ownerId]);
+    return c.json(rows || []);
+});
 app.get('/facture/billing-settings', async (c) => {
     const user = await getUserFromReq(c);
     if (!user) return c.json({});
