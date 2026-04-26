@@ -149,6 +149,34 @@ app.get('/admin/clients/:id', async (c) => {
 });
 app.get('/admin/clients/:id/collaborators', async (c) => c.json((await safeQuery(c, `SELECT ${collabCols} FROM collaborators WHERE client_id = ?`, [c.req.param('id')])).map(mapCollab)));
 
+app.get('/admin/clients/:id/factures', async (c) => {
+    const user = await getUserFromReq(c);
+    if (!user || user.role !== 'superadmin') return c.json({ error: 'Interdit' }, 403);
+    const rows = await safeQuery(c, `SELECT ${factureCols} FROM facture WHERE client_id = ?`, [c.req.param('id')]);
+    return c.json(rows.map(mapFacture) || []);
+});
+
+app.get('/admin/clients/:id/modules', async (c) => {
+    const user = await getUserFromReq(c);
+    if (!user || user.role !== 'superadmin') return c.json({ error: 'Interdit' }, 403);
+    const rows = await safeQuery(c, 'SELECT module_name, is_active FROM client_modules WHERE client_id = ?', [c.req.param('id')]);
+    return c.json(rows || []);
+});
+
+app.get('/admin/clients/:id/spaces', async (c) => {
+    const user = await getUserFromReq(c);
+    if (!user || user.role !== 'superadmin') return c.json({ error: 'Interdit' }, 403);
+    const rows = await safeQuery(c, 'SELECT * FROM evenementiel_spaces WHERE client_id = ?', [c.req.param('id')]);
+    return c.json(rows || []);
+});
+
+app.get('/admin/clients/:id/audit-logs', async (c) => {
+    const user = await getUserFromReq(c);
+    if (!user || user.role !== 'superadmin') return c.json({ error: 'Interdit' }, 403);
+    const rows = await safeQuery(c, 'SELECT * FROM audit_logs WHERE target_user_id = ? ORDER BY created_at DESC', [c.req.param('id')]);
+    return c.json(rows.map(r => ({ ...r, created_at: toISO(r.created_at) })) || []);
+});
+
 // --- MODULES ---
 app.get('/me/modules', async (c) => {
     const user = await getUserFromReq(c);
