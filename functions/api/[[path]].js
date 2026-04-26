@@ -301,7 +301,14 @@ app.get('/evenementiel', async (c) => {
                 WHERE a.event_id = ?
             `, [row.id]);
             const spaces = await safeQuery(c, 'SELECT s.* FROM evenementiel_spaces s JOIN evenementiel_event_spaces es ON s.id = es.space_id WHERE es.event_id = ?', [row.id]);
-            return { ...mapEvent(row), has_notes: !!row.has_notes, staff, assignments, spaces };
+            return { 
+                ...mapEvent(row), 
+                has_notes: !!row.has_notes, 
+                notes: row.note_text || '', // Compatibilité
+                staff, 
+                assignments, 
+                spaces 
+            };
         }));
         
         return c.json(events);
@@ -317,8 +324,16 @@ app.get('/evenementiel/config', async (c) => {
         const staff = await safeQuery(c, 'SELECT * FROM evenementiel_staff_types WHERE client_id = ?', [ownerId]);
         const spaces = await safeQuery(c, 'SELECT * FROM evenementiel_spaces WHERE client_id = ?', [ownerId]);
         
+        // Valeurs par défaut strictes si la config est vide
+        const defaultConfig = {
+            client_id: ownerId,
+            track_taken_by: 0,
+            allowed_taker_employee_ids: "[]",
+            notify_recipient_employee_ids: "[]"
+        };
+
         return c.json({
-            ...(config || { track_taken_by: 0, allowed_taker_employee_ids: "[]", notify_recipient_employee_ids: "[]" }),
+            ...(config || defaultConfig),
             authorized_staff_categories: staff,
             spaces: spaces
         });
@@ -379,7 +394,14 @@ app.get('/evenementiel/:id', async (c) => {
         `, [id]);
         const eventSpaces = await safeQuery(c, 'SELECT s.* FROM evenementiel_spaces s JOIN evenementiel_event_spaces es ON s.id = es.space_id WHERE es.event_id = ?', [id]);
         
-        return c.json({ ...mapEvent(row), has_notes: !!row.has_notes, staff, assignments, spaces: eventSpaces });
+        return c.json({ 
+            ...mapEvent(row), 
+            has_notes: !!row.has_notes, 
+            notes: row.note_text || '', // Compatibilité
+            staff, 
+            assignments, 
+            spaces: eventSpaces 
+        });
     } catch (e) { return c.json({ error: 'Erreur' }, 200); } // Sécurité max
 });
 
@@ -457,11 +479,12 @@ app.put('/evenementiel/:id', async (c) => {
         const body = await c.req.json();
     
         // 1. UPDATE Coeur
+        const taken_by = (body.taken_by_id === '' || body.taken_by_id === undefined) ? null : body.taken_by_id;
         const validParams = [
-            body.type, body.phone, body.email, body.address, 
-            body.start_time, body.end_time, body.num_people, 
-            body.first_name, body.last_name, body.company_name, 
-            body.organizer_name, body.taken_by_id,
+            body.type, body.phone || '', body.email || '', body.address || '', 
+            body.start_time, body.end_time, body.num_people || 0, 
+            body.first_name || '', body.last_name || '', body.company_name || '', 
+            body.organizer_name || '', taken_by,
             id, ownerId
         ];
         await c.env.DB.prepare(`
