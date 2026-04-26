@@ -862,6 +862,27 @@ app.get('/admin/support/tickets/:id/messages', async (c) => {
     } catch (e) { return c.json([]); }
 });
 
+// --- CLIENT STATS ---
+app.get('/client/stats', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user) return c.json({ error: 'Auth' }, 401);
+        const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
+
+        const revenueRes = await safeFirst(c, 'SELECT SUM(total_ttc) as total FROM facture WHERE client_id = ?', [ownerId]);
+        const eventsRes = await safeFirst(c, 'SELECT COUNT(*) as total FROM evenementiel WHERE client_id = ?', [ownerId]);
+        const collabRes = await safeFirst(c, 'SELECT COUNT(*) as total FROM collaborators WHERE client_id = ?', [ownerId]);
+        const pendingRes = await safeFirst(c, 'SELECT COUNT(*) as total FROM facture WHERE client_id = ? AND status != "paid"', [ownerId]);
+
+        return c.json({
+            revenue: revenueRes?.total || 0,
+            evenements: eventsRes?.total || 0,
+            collaborators: collabRes?.total || 0,
+            factures: pendingRes?.total || 0
+        });
+    } catch (e) { return c.json({ revenue: 0, evenements: 0, collaborators: 0, factures: 0 }); }
+});
+
 app.post('/admin/support/tickets/:id/messages', async (c) => {
     try {
         const user = await getUserFromReq(c);

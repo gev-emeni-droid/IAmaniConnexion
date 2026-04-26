@@ -133,6 +133,7 @@ export const moduleApi = {
     getJobPosts: () => apiFetch('/employes/posts'),
     createJobPost: (payload: any) => apiFetch('/employes/posts', { method: 'POST', body: JSON.stringify(payload) }),
     deleteJobPost: (id: string) => apiFetch(`/employes/posts/${id}`, { method: 'DELETE' }),
+    getClientStats: () => apiFetch('/client/stats'),
 };
 
 export const supportApi = {

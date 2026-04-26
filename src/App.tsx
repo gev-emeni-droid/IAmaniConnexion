@@ -608,13 +608,12 @@ const DashboardView = () => {
                 ]);
                 setRecentActivity([]);
             } else {
-                // const data = await dashboardApi.getClientStats();
-                const data = { employes: 0, evenements: 0, factures: 0, planning: 0, recentActivity: [] };
+                const data = await moduleApi.getClientStats();
                 setStats([
-                    { label: 'Employés', value: String(data.employes ?? 0), icon: Users, color: 'text-blue-400', bg: 'bg-blue-500/10' },
-                    { label: 'Événements', value: String(data.evenements ?? 0), icon: Calendar, color: 'text-purple-400', bg: 'bg-purple-500/10' },
-                    { label: 'Factures', value: String(data.factures ?? 0), icon: FileText, color: 'text-orange-400', bg: 'bg-green-500/10' },
-                    { label: 'Planning', value: String(data.planning ?? 0), icon: Briefcase, color: 'text-green-400', bg: 'bg-green-500/10' },
+                    { label: 'Collaborateurs', value: String(data.collaborators ?? 0), icon: Users, color: 'text-blue-400', bg: 'bg-blue-500/10' },
+                    { label: 'Privatisations', value: String(data.evenements ?? 0), icon: Calendar, color: 'text-purple-400', bg: 'bg-purple-500/10' },
+                    { label: 'Factures Attente', value: String(data.factures ?? 0), icon: FileText, color: 'text-orange-400', bg: 'bg-green-500/10' },
+                    { label: 'Chiffre d\'Affaires', value: `${(data.revenue ?? 0).toLocaleString('fr-FR')} €`, icon: Briefcase, color: 'text-green-400', bg: 'bg-green-500/10' },
                 ]);
                 setRecentActivity(Array.isArray(data.recentActivity) ? data.recentActivity : []);
             }
