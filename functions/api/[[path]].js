@@ -234,6 +234,20 @@ app.get('/admin/clients/:id/spaces', async (c) => {
     } catch (e) { return c.json([]); }
 });
 
+app.get('/admin/clients/:id/modules', async (c) => {
+    try {
+        const rows = await safeQuery(c, 'SELECT * FROM client_modules WHERE client_id = ?', [c.req.param('id')]);
+        return c.json(rows);
+    } catch (e) { return c.json([]); }
+});
+
+app.get('/admin/clients/:id/audit-logs', async (c) => {
+    try {
+        const rows = await safeQuery(c, 'SELECT * FROM audit_logs WHERE client_id = ? ORDER BY created_at DESC LIMIT 100', [c.req.param('id')]);
+        return c.json(rows.map(r => ({ ...r, created_at: toISO(r.created_at) })));
+    } catch (e) { return c.json([]); }
+});
+
 app.post('/admin/clients/:id/spaces', async (c) => {
     try {
         const id = crypto.randomUUID();
@@ -275,7 +289,16 @@ app.get('/evenementiel', async (c) => {
             WHERE e.client_id = ? 
             ORDER BY e.start_time DESC
         `, [ownerId]);
-        return c.json(rows.map(mapEvent) || []);
+        
+        // Pour chaque événement, on va chercher son staff et ses assignments (Audit cohérence)
+        const events = await Promise.all(rows.map(async (row) => {
+            const staff = await safeQuery(c, 'SELECT staff_type_id, count FROM evenementiel_event_staff WHERE event_id = ?', [row.id]);
+            const assignments = await safeQuery(c, 'SELECT employee_id, staff_type_id FROM evenementiel_event_assignments WHERE event_id = ?', [row.id]);
+            const spaces = await safeQuery(c, 'SELECT s.* FROM evenementiel_spaces s JOIN evenementiel_event_spaces es ON s.id = es.space_id WHERE es.event_id = ?', [row.id]);
+            return { ...mapEvent(row), staff, assignments, spaces };
+        }));
+        
+        return c.json(events);
     } catch (e) { return c.json([]); }
 });
 
@@ -286,12 +309,45 @@ app.post('/evenementiel', async (c) => {
         const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
         const body = await c.req.json();
         const id = crypto.randomUUID();
+        
+        // 1. Insertion Coeur
         await c.env.DB.prepare(`
-            INSERT INTO evenementiel (id, client_id, calendar_id, type, phone, email, address, start_time, end_time, num_people, documents, first_name, last_name, company_name, organizer_name)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).bind(id, ownerId, body.calendar_id, body.type, body.phone || '', body.email || '', body.address || '', body.start_time, body.end_time, body.num_people || 0, JSON.stringify(body.documents || []), body.first_name || '', body.last_name || '', body.company_name || '', body.organizer_name || '').run();
+            INSERT INTO evenementiel (id, client_id, calendar_id, type, phone, email, address, start_time, end_time, num_people, documents, first_name, last_name, company_name, organizer_name, taken_by_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).bind(
+            id, ownerId, body.calendar_id, body.type, body.phone || '', body.email || '', body.address || '', 
+            body.start_time, body.end_time, body.num_people || 0, JSON.stringify(body.documents || []), 
+            body.first_name || '', body.last_name || '', body.company_name || '', body.organizer_name || '', body.taken_by_id || null
+        ).run();
+
+        // 2. Espaces (Mapping)
+        if (body.space_ids && Array.isArray(body.space_ids)) {
+            for (const sid of body.space_ids) {
+                await c.env.DB.prepare('INSERT INTO evenementiel_event_spaces (event_id, space_id) VALUES (?, ?)').bind(id, sid).run();
+            }
+        }
+
+        // 3. Staffing (Besoins) - staff_requests est un objet { staffTypeId: count }
+        if (body.staff_requests) {
+            for (const [tid, cnt] of Object.entries(body.staff_requests)) {
+                await c.env.DB.prepare('INSERT INTO evenementiel_event_staff (event_id, staff_type_id, count) VALUES (?, ?, ?)').bind(id, tid, cnt).run();
+            }
+        }
+
+        // 4. Assignments (Staff Interne)
+        if (body.assignments && Array.isArray(body.assignments)) {
+            for (const ass of body.assignments) {
+                await c.env.DB.prepare('INSERT INTO evenementiel_event_assignments (event_id, employee_id, staff_type_id) VALUES (?, ?, ?)').bind(id, ass.employee_id, ass.staff_type_id).run();
+            }
+        }
+
+        // 5. Notes (Table séparée)
+        if (body.note_text) {
+            await c.env.DB.prepare('INSERT INTO event_notes (id, event_id, client_id, note_text) VALUES (?, ?, ?, ?)').bind(crypto.randomUUID(), id, ownerId, body.note_text).run();
+        }
+
         return c.json({ success: true, id });
-    } catch (e) { return c.json({ error: 'Erreur Création Événement' }, 500); }
+    } catch (e) { console.error('POST Event Error:', e); return c.json({ error: 'Erreur Création' }, 500); }
 });
 
 app.put('/evenementiel/:id', async (c) => {
@@ -302,7 +358,7 @@ app.put('/evenementiel/:id', async (c) => {
         const id = c.req.param('id');
         const body = await c.req.json();
     
-        // Nettoyage strict pour éviter les erreurs SQL (Error 500)
+        // 1. UPDATE Coeur
         const validParams = [
             body.type, body.phone, body.email, body.address, 
             body.start_time, body.end_time, body.num_people, 
@@ -310,7 +366,6 @@ app.put('/evenementiel/:id', async (c) => {
             body.organizer_name, body.taken_by_id,
             id, ownerId
         ];
-
         await c.env.DB.prepare(`
             UPDATE evenementiel SET 
             type = ?, phone = ?, email = ?, address = ?, start_time = ?, end_time = ?, 
@@ -318,7 +373,33 @@ app.put('/evenementiel/:id', async (c) => {
             WHERE id = ? AND client_id = ?
         `).bind(...validParams).run();
 
-        // Gestion des notes (table séparée)
+        // 2. Nettoyage Relations
+        await c.env.DB.prepare('DELETE FROM evenementiel_event_spaces WHERE event_id = ?').bind(id).run();
+        await c.env.DB.prepare('DELETE FROM evenementiel_event_staff WHERE event_id = ?').bind(id).run();
+        await c.env.DB.prepare('DELETE FROM evenementiel_event_assignments WHERE event_id = ?').bind(id).run();
+
+        // 3. Re-Insertion Espaces
+        if (body.space_ids && Array.isArray(body.space_ids)) {
+            for (const sid of body.space_ids) {
+                await c.env.DB.prepare('INSERT INTO evenementiel_event_spaces (event_id, space_id) VALUES (?, ?)').bind(id, sid).run();
+            }
+        }
+
+        // 4. Re-Insertion Staffing
+        if (body.staff_requests) {
+            for (const [tid, cnt] of Object.entries(body.staff_requests)) {
+                await c.env.DB.prepare('INSERT INTO evenementiel_event_staff (event_id, staff_type_id, count) VALUES (?, ?, ?)').bind(id, tid, cnt).run();
+            }
+        }
+
+        // 5. Re-Insertion Assignments
+        if (body.assignments && Array.isArray(body.assignments)) {
+            for (const ass of body.assignments) {
+                await c.env.DB.prepare('INSERT INTO evenementiel_event_assignments (event_id, employee_id, staff_type_id) VALUES (?, ?, ?)').bind(id, ass.employee_id, ass.staff_type_id).run();
+            }
+        }
+
+        // 6. Gestion des notes
         if (body.note_text !== undefined) {
             await c.env.DB.prepare(`
                 INSERT INTO event_notes (id, event_id, client_id, note_text) 
@@ -328,7 +409,7 @@ app.put('/evenementiel/:id', async (c) => {
         }
         
         return c.json({ success: true });
-    } catch (e) { console.error(e); return c.json({ error: 'Erreur SQL 500' }, 500); }
+    } catch (e) { console.error('PUT Event Error:', e); return c.json({ error: 'Erreur Maj 500' }, 500); }
 });
 
 app.delete('/evenementiel/:id', async (c) => {
@@ -398,14 +479,21 @@ app.get('/evenementiel/calendars/:id/events', async (c) => {
         const user = await getUserFromReq(c);
         if (!user) return c.json([]);
         const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
-        // Jointure avec event_notes pour ramener note_text
         const rows = await safeQuery(c, `
             SELECT e.*, n.note_text 
             FROM evenementiel e 
             LEFT JOIN event_notes n ON e.id = n.event_id 
             WHERE e.calendar_id = ? AND e.client_id = ?
         `, [c.req.param('id'), ownerId]);
-        return c.json(rows.map(mapEvent));
+        
+        const events = await Promise.all(rows.map(async (row) => {
+            const staff = await safeQuery(c, 'SELECT staff_type_id, count FROM evenementiel_event_staff WHERE event_id = ?', [row.id]);
+            const assignments = await safeQuery(c, 'SELECT employee_id, staff_type_id FROM evenementiel_event_assignments WHERE event_id = ?', [row.id]);
+            const spaces = await safeQuery(c, 'SELECT s.* FROM evenementiel_spaces s JOIN evenementiel_event_spaces es ON s.id = es.space_id WHERE es.event_id = ?', [row.id]);
+            return { ...mapEvent(row), staff, assignments, spaces };
+        }));
+        
+        return c.json(events);
     } catch (e) { return c.json([]); }
 });
 
