@@ -191,7 +191,49 @@ app.get('/employes', async (c) => {
     const user = await getUserFromReq(c);
     if (!user) return c.json([]);
     const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
-    return c.json((await safeQuery(c, `SELECT ${employeCols} FROM employes WHERE client_id = ? ORDER BY last_name, first_name`, [ownerId])).map(r => ({ ...r, hire_date: toISO(r.hire_date) })));
+    const rows = await safeQuery(c, `SELECT ${employeCols} FROM employes WHERE client_id = ? ORDER BY last_name, first_name`, [ownerId]);
+    return c.json(rows.map(r => ({ ...r, hire_date: toISO(r.hire_date) })));
+});
+
+app.get('/employes/posts', async (c) => {
+    const user = await getUserFromReq(c);
+    if (!user) return c.json([]);
+    const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
+    const rows = await safeQuery(c, 'SELECT * FROM job_posts WHERE client_id = ?', [ownerId]);
+    return c.json(rows || []);
+});
+
+// --- DIVERS / SETTINGS ---
+app.get('/facture/billing-settings', async (c) => {
+    const user = await getUserFromReq(c);
+    if (!user) return c.json({});
+    const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
+    const row = await safeFirst(c, 'SELECT * FROM billing_settings WHERE client_id = ?', [ownerId]);
+    return c.json(row || {});
+});
+
+app.get('/evenementiel/config', async (c) => {
+    const user = await getUserFromReq(c);
+    if (!user) return c.json({});
+    const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
+    const row = await safeFirst(c, 'SELECT * FROM evenementiel_config WHERE client_id = ?', [ownerId]);
+    return c.json(row || { track_taken_by: 0, allowed_taker_employee_ids: "[]", notify_recipient_employee_ids: "[]" });
+});
+
+app.get('/evenementiel/spaces', async (c) => {
+    const user = await getUserFromReq(c);
+    if (!user) return c.json([]);
+    const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
+    const rows = await safeQuery(c, 'SELECT * FROM evenementiel_spaces WHERE client_id = ?', [ownerId]);
+    return c.json(rows || []);
+});
+
+app.get('/evenementiel/calendars/:id/events', async (c) => {
+    const user = await getUserFromReq(c);
+    if (!user) return c.json([]);
+    const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
+    const rows = await safeQuery(c, `SELECT ${eventCols} FROM evenementiel WHERE client_id = ? AND calendar_id = ?`, [ownerId, c.req.param('id')]);
+    return c.json(rows.map(mapEvent));
 });
 
 export const onRequest = handle(app);
