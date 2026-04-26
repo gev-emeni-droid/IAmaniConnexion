@@ -301,18 +301,34 @@ app.put('/evenementiel/:id', async (c) => {
         const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
         const id = c.req.param('id');
         const body = await c.req.json();
+    
+        // Nettoyage strict pour éviter les erreurs SQL (Error 500)
+        const validParams = [
+            body.type, body.phone, body.email, body.address, 
+            body.start_time, body.end_time, body.num_people, 
+            body.first_name, body.last_name, body.company_name, 
+            body.organizer_name, body.taken_by_id,
+            id, ownerId
+        ];
+
         await c.env.DB.prepare(`
             UPDATE evenementiel SET 
             type = ?, phone = ?, email = ?, address = ?, start_time = ?, end_time = ?, 
-            num_people = ?, first_name = ?, last_name = ?, company_name = ?, organizer_name = ?
+            num_people = ?, first_name = ?, last_name = ?, company_name = ?, organizer_name = ?, taken_by_id = ?
             WHERE id = ? AND client_id = ?
-        `).bind(
-            body.type, body.phone, body.email, body.address, body.start_time, body.end_time,
-            body.num_people, body.first_name, body.last_name, body.company_name, body.organizer_name,
-            id, ownerId
-        ).run();
+        `).bind(...validParams).run();
+
+        // Gestion des notes (table séparée)
+        if (body.note_text !== undefined) {
+            await c.env.DB.prepare(`
+                INSERT INTO event_notes (id, event_id, client_id, note_text) 
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(event_id) DO UPDATE SET note_text = EXCLUDED.note_text, updated_at = CURRENT_TIMESTAMP
+            `).bind(crypto.randomUUID(), id, ownerId, body.note_text).run();
+        }
+        
         return c.json({ success: true });
-    } catch (e) { return c.json({ error: 'Erreur Mise à jour' }, 500); }
+    } catch (e) { console.error(e); return c.json({ error: 'Erreur SQL 500' }, 500); }
 });
 
 app.delete('/evenementiel/:id', async (c) => {
@@ -571,6 +587,27 @@ app.get('/employes', async (c) => {
         const rows = await safeQuery(c, `SELECT ${employeCols} FROM employes WHERE client_id = ? ORDER BY last_name, first_name`, [ownerId]);
         return c.json(rows.map(r => ({ ...r, hire_date: toISO(r.hire_date) })));
     } catch (e) { return c.json([]); }
+});
+
+app.put('/employes/:id', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user) return c.json({ error: 'Auth' }, 401);
+        const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
+        const id = c.req.param('id');
+        const body = await c.req.json();
+        
+        await c.env.DB.prepare(`
+            UPDATE employes SET 
+            first_name = ?, last_name = ?, email = ?, position = ?, salary = ?, hire_date = ?, tags = ?, phone = ?, address = ?
+            WHERE id = ? AND client_id = ?
+        `).bind(
+            body.first_name, body.last_name, body.email, body.position, body.salary, body.hire_date, 
+            JSON.stringify(body.tags || []), body.phone, body.address, id, ownerId
+        ).run();
+        
+        return c.json({ success: true });
+    } catch (e) { return c.json({ error: 'Erreur Maj Employé' }, 500); }
 });
 
 app.get('/employes/posts', async (c) => {
