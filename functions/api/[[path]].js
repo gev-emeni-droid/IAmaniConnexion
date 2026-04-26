@@ -283,22 +283,73 @@ app.get('/evenementiel', async (c) => {
         if (!user) return c.json([]);
         const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
         const rows = await safeQuery(c, `
-            SELECT e.*, n.note_text 
+            SELECT e.*, 
+                   n.note_text,
+                   CASE WHEN n.id IS NOT NULL THEN 1 ELSE 0 END as has_notes
             FROM evenementiel e 
             LEFT JOIN event_notes n ON e.id = n.event_id 
             WHERE e.client_id = ? 
             ORDER BY e.start_time DESC
         `, [ownerId]);
         
-        // Pour chaque événement, on va chercher son staff et ses assignments (Audit cohérence)
         const events = await Promise.all(rows.map(async (row) => {
             const staff = await safeQuery(c, 'SELECT staff_type_id, count FROM evenementiel_event_staff WHERE event_id = ?', [row.id]);
-            const assignments = await safeQuery(c, 'SELECT employee_id, staff_type_id FROM evenementiel_event_assignments WHERE event_id = ?', [row.id]);
+            const assignments = await safeQuery(c, `
+                SELECT a.employee_id, a.staff_type_id, e.first_name, e.last_name, e.position
+                FROM evenementiel_event_assignments a
+                JOIN employes e ON a.employee_id = e.id
+                WHERE a.event_id = ?
+            `, [row.id]);
             const spaces = await safeQuery(c, 'SELECT s.* FROM evenementiel_spaces s JOIN evenementiel_event_spaces es ON s.id = es.space_id WHERE es.event_id = ?', [row.id]);
-            return { ...mapEvent(row), staff, assignments, spaces };
+            return { ...mapEvent(row), has_notes: !!row.has_notes, staff, assignments, spaces };
         }));
         
         return c.json(events);
+    } catch (e) { return c.json([]); }
+});
+
+app.get('/evenementiel/:id', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user) return c.json({ error: 'Auth' }, 401);
+        const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
+        const id = c.req.param('id');
+        const row = await safeFirst(c, `
+            SELECT e.*, n.note_text, CASE WHEN n.id IS NOT NULL THEN 1 ELSE 0 END as has_notes
+            FROM evenementiel e 
+            LEFT JOIN event_notes n ON e.id = n.event_id 
+            WHERE e.id = ? AND e.client_id = ?
+        `, [id, ownerId]);
+        
+        if (!row) return c.json({ error: 'Note introuvable' }, 404);
+        
+        const staff = await safeQuery(c, 'SELECT staff_type_id, count FROM evenementiel_event_staff WHERE event_id = ?', [id]);
+        const assignments = await safeQuery(c, `
+            SELECT a.employee_id, a.staff_type_id, e.first_name, e.last_name, e.position
+            FROM evenementiel_event_assignments a
+            JOIN employes e ON a.employee_id = e.id
+            WHERE a.event_id = ?
+        `, [id]);
+        const spaces = await safeQuery(c, 'SELECT s.* FROM evenementiel_spaces s JOIN evenementiel_event_spaces es ON s.id = es.space_id WHERE es.event_id = ?', [id]);
+        
+        return c.json({ ...mapEvent(row), has_notes: !!row.has_notes, staff, assignments, spaces });
+    } catch (e) { return c.json({ error: 'Erreur 500' }, 500); }
+});
+
+app.get('/evenementiel/:id/staff', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user) return c.json([]);
+        const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
+        const id = c.req.param('id');
+        
+        const rows = await safeQuery(c, `
+            SELECT a.employee_id, a.staff_type_id, e.first_name, e.last_name, e.position
+            FROM evenementiel_event_assignments a
+            JOIN employes e ON a.employee_id = e.id
+            WHERE a.event_id = ? AND e.client_id = ?
+        `, [id, ownerId]);
+        return c.json(rows);
     } catch (e) { return c.json([]); }
 });
 
@@ -480,7 +531,7 @@ app.get('/evenementiel/calendars/:id/events', async (c) => {
         if (!user) return c.json([]);
         const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
         const rows = await safeQuery(c, `
-            SELECT e.*, n.note_text 
+            SELECT e.*, n.note_text, CASE WHEN n.id IS NOT NULL THEN 1 ELSE 0 END as has_notes
             FROM evenementiel e 
             LEFT JOIN event_notes n ON e.id = n.event_id 
             WHERE e.calendar_id = ? AND e.client_id = ?
@@ -488,9 +539,14 @@ app.get('/evenementiel/calendars/:id/events', async (c) => {
         
         const events = await Promise.all(rows.map(async (row) => {
             const staff = await safeQuery(c, 'SELECT staff_type_id, count FROM evenementiel_event_staff WHERE event_id = ?', [row.id]);
-            const assignments = await safeQuery(c, 'SELECT employee_id, staff_type_id FROM evenementiel_event_assignments WHERE event_id = ?', [row.id]);
+            const assignments = await safeQuery(c, `
+                SELECT a.employee_id, a.staff_type_id, e.first_name, e.last_name, e.position
+                FROM evenementiel_event_assignments a
+                JOIN employes e ON a.employee_id = e.id
+                WHERE a.event_id = ?
+            `, [row.id]);
             const spaces = await safeQuery(c, 'SELECT s.* FROM evenementiel_spaces s JOIN evenementiel_event_spaces es ON s.id = es.space_id WHERE es.event_id = ?', [row.id]);
-            return { ...mapEvent(row), staff, assignments, spaces };
+            return { ...mapEvent(row), has_notes: !!row.has_notes, staff, assignments, spaces };
         }));
         
         return c.json(events);
