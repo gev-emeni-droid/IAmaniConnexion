@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
+    "start": "tsx src/server/app.ts",
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist",
@@ -36,6 +37,7 @@
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.14.0",
     "resend": "^6.10.0",
+    "serve": "^14.2.6",
     "vite": "^6.2.0",
     "xlsx": "^0.18.5",
     "zod": "^4.3.6"

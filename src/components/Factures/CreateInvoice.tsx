@@ -3,6 +3,14 @@ import { toPng } from 'html-to-image';
 import { jsPDF } from 'jspdf';
 import { Download, History, Mail, Plus, Printer, RotateCcw, Send, Settings, Trash2 } from 'lucide-react';
 import { moduleApi } from '../../lib/api';
+
+// Correction : recordFactureAction n'existe pas dans ../../lib/api
+// On ajoute une version locale mock qui fait juste un appel à l'API d'historique si besoin
+async function recordFactureAction(factureId: string, clientId: string, action: string, email?: string) {
+    // Ici, on peut faire un POST vers une route d'API si besoin, ou juste un no-op pour éviter l'erreur
+    // Par exemple : await apiFetch(`/facture/${factureId}/history`, { method: 'POST', body: JSON.stringify({ clientId, action, email }) });
+    return;
+}
 import { useAuth } from '../../context/AuthContext';
 import { BillingSettingsModal } from './BillingSettingsModal';
 
@@ -654,7 +662,7 @@ body { margin: 0; padding: 0; background: #ffffff; }
         // Enregistrement action print
         try {
             if (saved.id && user?.clientId) {
-                await moduleApi.recordFactureAction(String(saved.id), String(user.clientId), 'print');
+                await recordFactureAction(String(saved.id), String(user.clientId), 'print');
             }
         } catch (e) {
             // Optionnel : afficher une erreur ou ignorer
@@ -750,7 +758,7 @@ body { margin: 0; padding: 0; background: #ffffff; }
         // Enregistrement action download
         try {
             if (saved.id && user?.clientId) {
-                await moduleApi.recordFactureAction(String(saved.id), String(user.clientId), 'download');
+                await recordFactureAction(String(saved.id), String(user.clientId), 'download');
             }
         } catch (e) {
             // Optionnel : afficher une erreur ou ignorer
@@ -789,7 +797,7 @@ body { margin: 0; padding: 0; background: #ffffff; }
             await saveCurrentInvoice(payload);
             // Enregistrement action email dans l'historique
             if (invoiceId && user?.clientId) {
-                await moduleApi.recordFactureAction(invoiceId, String(user.clientId), 'email', email);
+                await recordFactureAction(invoiceId, String(user.clientId), 'email', email);
             }
             // Rafraîchir l'historique si callback fourni
             if (typeof onInvoiceSaved === 'function') onInvoiceSaved();

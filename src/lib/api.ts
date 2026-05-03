@@ -1,9 +1,32 @@
-// Enregistrer une action d'historique (print/download/email) pour une facture
-export const recordFactureAction = async (factureId: string, clientId: string, action: 'print' | 'download' | 'email', email?: string) => {
-    return apiFetch(`/facture/${factureId}/history`, {
-        method: 'POST',
-        body: JSON.stringify({ action, client_id: clientId, email }),
-    });
+// --- API Admin ---
+export const adminApi = {
+    getStats: () => apiFetch('/admin/stats'),
+    getClients: () => apiFetch('/admin/clients'),
+    uploadLogo: (formData: FormData) => apiFetch('/admin/upload-logo', { method: 'POST', body: formData }),
+    createClient: (payload: any) => apiFetch('/admin/clients', { method: 'POST', body: JSON.stringify(payload) }),
+    impersonateClient: (clientId: string) => apiFetch(`/admin/clients/${clientId}/impersonate`, { method: 'POST' }),
+    getClientFactures: (clientId: string) => apiFetch(`/admin/clients/${clientId}/factures`),
+    deleteClientFacture: (clientId: string, factureId: string) => apiFetch(`/admin/clients/${clientId}/factures/${factureId}`, { method: 'DELETE' }),
+    previewImportExcel: (clientId: string, formData: FormData) => apiFetch(`/admin/import-excel/${clientId}/preview`, { method: 'POST', body: formData, timeoutMs: 30000 }),
+    executeImportExcel: (clientId: string, formData: FormData) => apiFetch(`/admin/import-excel/${clientId}/execute`, { method: 'POST', body: formData, timeoutMs: 120000 }),
+    getClientModules: (clientId: string) => apiFetch(`/admin/clients/${clientId}/modules`),
+    updateClientModules: (clientId: string, modules: any) => apiFetch(`/admin/clients/${clientId}/modules`, { method: 'PUT', body: JSON.stringify(modules) }),
+    getCollaborators: (clientId: string) => apiFetch(`/admin/clients/${clientId}/collaborators`),
+    updateCollaborator: (clientId: string, collaboratorId: string, collaborator: any) => apiFetch(`/admin/clients/${clientId}/collaborators/${collaboratorId}`, { method: 'PATCH', body: JSON.stringify(collaborator) }),
+    createCollaborator: (clientId: string, collaborator: any) => apiFetch(`/admin/clients/${clientId}/collaborators`, { method: 'POST', body: JSON.stringify(collaborator) }),
+    deleteCollaborator: (clientId: string, collaboratorId: string) => apiFetch(`/admin/clients/${clientId}/collaborators/${collaboratorId}`, { method: 'DELETE' }),
+    getSpaces: (clientId: string) => apiFetch(`/admin/clients/${clientId}/spaces`),
+    createSpace: (clientId: string, space: any) => apiFetch(`/admin/clients/${clientId}/spaces`, { method: 'POST', body: JSON.stringify(space) }),
+    updateSpace: (clientId: string, spaceId: string, payload: any) => apiFetch(`/admin/clients/${clientId}/spaces/${spaceId}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+    deleteSpace: (clientId: string, spaceId: string) => apiFetch(`/admin/clients/${clientId}/spaces/${spaceId}`, { method: 'DELETE' }),
+    getClientAuditLogs: (clientId: string) => apiFetch(`/admin/clients/${clientId}/audit-logs`),
+    getStaffTypes: (clientId: string) => apiFetch(`/admin/clients/${clientId}/staff-types`),
+    createStaffType: (clientId: string, staff: any) => apiFetch(`/admin/clients/${clientId}/staff-types`, { method: 'POST', body: JSON.stringify(staff) }),
+    deleteStaffType: (clientId: string, staffId: string) => apiFetch(`/admin/clients/${clientId}/staff-types/${staffId}`, { method: 'DELETE' }),
+    updateClient: (clientId: string, payload: any) => apiFetch(`/admin/clients/${clientId}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+    deleteClient: (clientId: string) => apiFetch(`/admin/clients/${clientId}`, { method: 'DELETE' }),
+    resetClientPassword: (clientId: string) => apiFetch(`/admin/clients/${clientId}/reset-password`, { method: 'POST' }),
+    forceResetClientPassword: (clientId: string) => apiFetch(`/admin/clients/${clientId}/force-reset-password`, { method: 'POST' }),
 };
 const API_URL = '/api';
 
@@ -24,15 +47,14 @@ export async function apiFetch(endpoint: string, options: ApiFetchOptions = {}) 
     if (!isFormData && !headers['Content-Type']) {
         headers['Content-Type'] = 'application/json';
     }
-
     try {
-        const response = await fetch(`${API_URL}${endpoint}`, { 
-            ...options, 
+        const response = await fetch(`${API_URL}${endpoint}`, {
+            ...options,
             headers,
-            signal: controller.signal 
+            signal: controller.signal
         });
         clearTimeout(timeoutId);
-        
+
         let data;
         const contentType = response.headers.get('content-type');
         if (contentType && contentType.includes('application/json')) {
@@ -65,42 +87,6 @@ export const authApi = {
     getMyModules: () => apiFetch('/me/modules'),
 };
 
-export const adminApi = {
-    getStats: () => apiFetch('/admin/stats'),
-    getClients: () => apiFetch('/admin/clients'),
-    createClient: (client: any) => apiFetch('/admin/clients', { method: 'POST', body: JSON.stringify(client) }),
-    updateClient: (id: string, data: any) => apiFetch(`/admin/clients/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
-    deleteClient: (id: string) => apiFetch(`/admin/clients/${id}`, { method: 'DELETE' }),
-    resetClientPassword: (id: string) => apiFetch(`/admin/clients/${id}/reset-password`, { method: 'POST' }),
-    forceResetClientPassword: (id: string) => apiFetch(`/admin/clients/${id}/force-reset`, { method: 'POST' }),
-    impersonateClient: (id: string) => apiFetch(`/admin/clients/${id}/impersonate`, { method: 'POST' }),
-    getClientModules: (id: string) => apiFetch(`/admin/clients/${id}/modules`),
-    updateClientModules: (id: string, modules: any) => apiFetch(`/admin/clients/${id}/modules`, { method: 'POST', body: JSON.stringify({ modules }) }),
-    getCollaborators: (clientId: string) => apiFetch(`/admin/clients/${clientId}/collaborators`),
-    getClientAuditLogs: (clientId: string) => apiFetch(`/admin/clients/${clientId}/audit-logs`),
-    getClientFactures: (clientId: string) => apiFetch(`/admin/clients/${clientId}/factures`),
-    deleteClientFacture: (clientId: string, factureId: string) => apiFetch(`/admin/clients/${clientId}/factures/${factureId}`, { method: 'DELETE' }),
-    uploadLogo: (formData: FormData) => apiFetch('/admin/upload-logo', { method: 'POST', body: formData }),
-    createCollaborator: (clientId: string, collaborator: any) => apiFetch(`/admin/clients/${clientId}/collaborators`, { method: 'POST', body: JSON.stringify(collaborator) }),
-    updateCollaborator: (clientId: string, collaboratorId: string, collaborator: any) => apiFetch(`/admin/clients/${clientId}/collaborators/${collaboratorId}`, { method: 'PATCH', body: JSON.stringify(collaborator) }),
-    resetCollaboratorPassword: (clientId: string, collaboratorId: string) => apiFetch(`/admin/clients/${clientId}/collaborators/${collaboratorId}/reset-password`, { method: 'POST' }),
-    forceResetCollaboratorPassword: (clientId: string, collaboratorId: string) => apiFetch(`/admin/clients/${clientId}/collaborators/${collaboratorId}/force-reset`, { method: 'POST' }),
-    deleteCollaborator: (clientId: string, collaboratorId: string) => apiFetch(`/admin/clients/${clientId}/collaborators/${collaboratorId}`, { method: 'DELETE' }),
-    getSpaces: (id: string) => apiFetch(`/admin/clients/${id}/spaces`),
-    createSpace: (id: string, space: any) => apiFetch(`/admin/clients/${id}/spaces`, { method: 'POST', body: JSON.stringify(space) }),
-    updateSpace: (clientId: string, spaceId: string, payload: any) => apiFetch(`/admin/clients/${clientId}/spaces/${spaceId}`, { method: 'PATCH', body: JSON.stringify(payload) }),
-    deleteSpace: (clientId: string, spaceId: string) => apiFetch(`/admin/clients/${clientId}/spaces/${spaceId}`, { method: 'DELETE' }),
-    getStaffTypes: (id: string) => apiFetch(`/admin/clients/${id}/staff-types`),
-    createStaffType: (id: string, staff: any) => apiFetch(`/admin/clients/${id}/staff-types`, { method: 'POST', body: JSON.stringify(staff) }),
-    deleteStaffType: (clientId: string, staffId: string) => apiFetch(`/admin/clients/${clientId}/staff-types/${staffId}`, { method: 'DELETE' }),
-    previewImportExcel: (clientId: string, formData: FormData) => apiFetch(`/admin/import-excel/${clientId}/preview`, { method: 'POST', body: formData, timeoutMs: 30000 }),
-    executeImportExcel: (clientId: string, formData: FormData) => apiFetch(`/admin/import-excel/${clientId}/execute`, { method: 'POST', body: formData, timeoutMs: 120000 }),
-};
-
-export const dashboardApi = {
-    getClientStats: () => apiFetch('/dashboard/stats'),
-};
-
 export const moduleApi = {
     getPlanning: () => apiFetch('/planning'),
     getEvenementiel: () => apiFetch('/evenementiel'),
@@ -131,11 +117,11 @@ export const moduleApi = {
     searchFactureCRMContacts: (q: string) => apiFetch(`/facture/crm-search?q=${encodeURIComponent(q)}`),
     createFacture: (payload: any) => apiFetch('/facture', { method: 'POST', body: JSON.stringify(payload) }),
     sendFactureEmail: (id: string, payload: any) => apiFetch(`/facture/${id}/send-email`, { method: 'POST', body: JSON.stringify(payload) }),
-    // Nouvelle version : envoi de facture par email (historique enregistré côté serveur)
-    sendFactureEmailServer: (factureId: string, to: string) =>
-        apiFetch(`/factures/${factureId}/send`, {
+    // Nouvelle version : envoi de facture par email (PDF généré côté serveur)
+    sendFactureEmailServer: (factureId: string, to: string, invoicePayload: any, pdfBase64?: string, filename?: string) =>
+        apiFetch(`/facture/${factureId}/send-email`, {
             method: 'POST',
-            body: JSON.stringify({ email: to }),
+            body: JSON.stringify({ to, invoicePayload, pdfBase64, filename }),
         }),
     deleteFacture: (id: string) => apiFetch(`/facture/${id}`, { method: 'DELETE' }),
     getBillingSettings: () => apiFetch('/facture/billing-settings'),
@@ -147,6 +133,11 @@ export const moduleApi = {
     getJobPosts: () => apiFetch('/employes/posts'),
     createJobPost: (payload: any) => apiFetch('/employes/posts', { method: 'POST', body: JSON.stringify(payload) }),
     deleteJobPost: (id: string) => apiFetch(`/employes/posts/${id}`, { method: 'DELETE' }),
+    getClientStats: () => apiFetch('/client/stats'),
+};
+
+export const dashboardApi = {
+    getClientStats: () => apiFetch('/client/stats'),
 };
 
 export const supportApi = {

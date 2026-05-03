@@ -4,16 +4,47 @@ import path from 'path';
 import fs from 'fs';
 import { getRequestListener } from '@hono/node-server';
 import { config as loadEnv } from 'dotenv';
-import app from './src/server/app.ts';
+import { app } from './functions/api/[[path]].js';
+import Database from 'better-sqlite3';
 
 // Load local overrides first, then fallback to .env.
 loadEnv({ path: '.env.local' });
 loadEnv();
 
+const db = new Database('database.sqlite');
+
+// Mock Cloudflare D1 for local development
+const localDB = {
+    prepare: (sql: string) => ({
+        bind: (...params: any[]) => ({
+            all: async () => ({ results: db.prepare(sql).all(...params) }),
+            first: async () => db.prepare(sql).get(...params),
+            run: async () => {
+                const info = db.prepare(sql).run(...params);
+                return { success: true, meta: info };
+            }
+        }),
+        all: async () => ({ results: db.prepare(sql).all() }),
+        first: async () => db.prepare(sql).get(),
+        run: async () => {
+            const info = db.prepare(sql).run();
+            return { success: true, meta: info };
+        }
+    })
+};
+
 async function startServer() {
     const server = express();
-    const PORT = 3000;
-    const requestListener = getRequestListener(app.fetch);
+    const PORT = 3001;
+
+    // Inject local environment into Hono
+    const requestListener = getRequestListener((req) => {
+        return app.fetch(req, {
+            DB: localDB,
+            RESEND_API_KEY: process.env.RESEND_API_KEY || 'local_key',
+            JWT_SECRET: process.env.JWT_SECRET || 'iamani_stable_secret_2026'
+        });
+    });
     
     // Simple health check for Express
     server.get('/express-health', (req, res) => {
