@@ -785,21 +785,22 @@ app.get('/crm/contacts/:id', async (c) => {
         
         // Matching intelligent ultra-permissif pour l'historique
         const emailMatch = contact.email || '____';
-        const phoneMatch = contact.phone || '____';
-        // Extraire le nom pur pour le matching (éviter les préfixes de migration)
-        const pureName = (contact.company_name || contact.organizer_name || `${contact.first_name || ''} ${contact.last_name || ''}`).trim();
+        const phoneMatch = (contact.phone || '____').replace(/\s/g, ''); // Nettoyage espaces
+        const companyMatch = contact.company_name ? `%${contact.company_name}%` : '____';
+        const organizerMatch = contact.organizer_name ? `%${contact.organizer_name}%` : '____';
+        const fullNameMatch = `%${(contact.first_name || '')} ${(contact.last_name || '')}%`.trim();
         
         const matchedEvents = await safeQuery(c, `
             SELECT ${eventCols} FROM evenementiel 
             WHERE client_id = ? AND (
-                email = ? OR 
-                (phone = ? AND phone != '') OR 
-                company_name LIKE ? OR 
-                organizer_name LIKE ? OR
-                (first_name || ' ' || last_name) LIKE ?
+                (email = ? AND email != '') OR 
+                (REPLACE(phone, ' ', '') = ? AND phone != '') OR 
+                (company_name LIKE ? AND company_name != '') OR 
+                (organizer_name LIKE ? AND organizer_name != '') OR
+                ((first_name || ' ' || last_name) LIKE ? AND (first_name != '' OR last_name != ''))
             )
             ORDER BY start_time DESC
-        `, [ownerId, emailMatch, phoneMatch, `%${pureName}%`, `%${pureName}%`, `%${pureName}%`]);
+        `, [ownerId, emailMatch, phoneMatch, companyMatch, organizerMatch, fullNameMatch === '%%' ? '____' : fullNameMatch]);
         
         return c.json({
             ...contact,
