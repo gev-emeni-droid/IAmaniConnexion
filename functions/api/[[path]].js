@@ -433,16 +433,17 @@ app.get('/evenementiel/config', async (c) => {
         const staff = await safeQuery(c, 'SELECT * FROM evenementiel_staff_types WHERE client_id = ?', [ownerId]);
         const spaces = await safeQuery(c, 'SELECT * FROM evenementiel_spaces WHERE client_id = ?', [ownerId]);
         
-        // Valeurs par défaut strictes si la config est vide
-        const defaultConfig = {
-            client_id: ownerId,
-            track_taken_by: 0,
-            allowed_taker_employee_ids: "[]",
-            notify_recipient_employee_ids: "[]"
+        const safeParse = (val) => {
+            if (!val) return [];
+            if (typeof val !== 'string') return val;
+            try { return JSON.parse(val); } catch(e) { return []; }
         };
 
         return c.json({
-            ...(config || defaultConfig),
+            client_id: ownerId,
+            track_taken_by: Boolean(config?.track_taken_by || 0),
+            allowed_taker_employee_ids: safeParse(config?.allowed_taker_employee_ids),
+            notify_recipient_employee_ids: safeParse(config?.notify_recipient_employee_ids),
             authorized_staff_categories: staff,
             spaces: spaces
         });
@@ -871,9 +872,11 @@ app.get('/crm/contacts/:id', async (c) => {
         
         // Matching intelligent ultra-permissif pour l'historique
         const emailMatch = contact.email || '____';
-        const phoneMatch = (contact.phone || '____').replace(/\s/g, ''); // Nettoyage espaces
+        const phoneMatch = (contact.phone || '____').replace(/\s/g, '');
         const companyMatch = contact.company_name ? `%${contact.company_name}%` : '____';
         const organizerMatch = contact.organizer_name ? `%${contact.organizer_name}%` : '____';
+        const firstNameMatch = contact.first_name ? `%${contact.first_name}%` : '____';
+        const lastNameMatch = contact.last_name ? `%${contact.last_name}%` : '____';
         const fullNameMatch = `%${(contact.first_name || '')} ${(contact.last_name || '')}%`.trim();
         
         const matchedEvents = await safeQuery(c, `
@@ -884,10 +887,12 @@ app.get('/crm/contacts/:id', async (c) => {
                 (REPLACE(phone, ' ', '') = ? AND phone != '') OR 
                 (company_name LIKE ? AND company_name != '') OR 
                 (organizer_name LIKE ? AND organizer_name != '') OR
-                ((first_name || ' ' || last_name) LIKE ? AND (first_name != '' OR last_name != ''))
+                (first_name LIKE ? AND first_name != '') OR
+                (last_name LIKE ? AND last_name != '') OR
+                ((COALESCE(first_name, '') || ' ' || COALESCE(last_name, '')) LIKE ? AND (first_name != '' OR last_name != ''))
             )
             ORDER BY start_time DESC
-        `, [ownerId, id, emailMatch, phoneMatch, companyMatch, organizerMatch, fullNameMatch === '%%' ? '____' : fullNameMatch]);
+        `, [ownerId, id, emailMatch, phoneMatch, companyMatch, organizerMatch, firstNameMatch, lastNameMatch, fullNameMatch === '%%' ? '____' : fullNameMatch]);
         
         return c.json({
             ...contact,
@@ -1232,10 +1237,12 @@ app.get('/client/stats', async (c) => {
         const revenueRes = await safeFirst(c, 'SELECT SUM(total_ttc) as total FROM facture WHERE client_id = ?', [ownerId]);
         const eventsRes = await safeFirst(c, 'SELECT COUNT(*) as total FROM evenementiel WHERE client_id = ?', [ownerId]);
         const collabRes = await safeFirst(c, 'SELECT COUNT(*) as total FROM collaborators WHERE client_id = ?', [ownerId]);
-        const pendingRes = await safeFirst(c, 'SELECT COUNT(*) as total FROM facture WHERE client_id = ? AND status != "paid"', [ownerId]);
         const facturesRes = await safeFirst(c, 'SELECT COUNT(*) as total FROM facture WHERE client_id = ?', [ownerId]);
+        const pendingRes = await safeFirst(c, 'SELECT COUNT(*) as total FROM facture WHERE client_id = ? AND status != ?', [ownerId, 'PAID']);
         const employesRes = await safeFirst(c, 'SELECT COUNT(*) as total FROM employes WHERE client_id = ?', [ownerId]);
         const planningRes = await safeFirst(c, 'SELECT COUNT(*) as total FROM planning WHERE client_id = ?', [ownerId]);
+
+        console.log(`Stats for ${ownerId}: Rev=${revenueRes?.total}, Evt=${eventsRes?.total}, Col=${collabRes?.total}, Fac=${facturesRes?.total}, Emp=${employesRes?.total}, Pla=${planningRes?.total}`);
 
         return c.json({
             revenue: revenueRes?.total || 0,
