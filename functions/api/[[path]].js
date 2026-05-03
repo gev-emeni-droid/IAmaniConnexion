@@ -17,7 +17,7 @@ const clientCols = `
 const collabCols = `id, client_id, email, username, name, role, status, created_at, modules_access`;
 const factureCols = `
     id, client_id, invoice_number, customer_name, amount, status, due_date, created_at,
-    total_ht, total_tva, total_ttc, already_paid, remaining_due, crm_contact_id, last_sent_email, last_sent_at
+    payload_json, billing_snapshot, total_ht, total_tva, total_ttc, already_paid, remaining_due, crm_contact_id, last_sent_email, last_sent_at
 `;
 const crmCols = `
     id, client_id, type, first_name, last_name, company_name, organizer_name, email, phone,
@@ -230,9 +230,18 @@ app.get('/me/modules', async (c) => {
 // --- ADMIN ---
 app.get('/admin/stats', async (c) => {
     try {
-        const count = (await safeFirst(c, 'SELECT COUNT(*) as c FROM clients'))?.c || 0;
-        return c.json({ clientsCount: count, revenue: '0 €', activeModulesCount: 0, collaboratorsCount: 0 });
-    } catch (e) { return c.json({ clientsCount: 0 }); }
+        const clientsCount = (await safeFirst(c, 'SELECT COUNT(*) as c FROM clients'))?.c || 0;
+        const revenue = (await safeFirst(c, 'SELECT SUM(total_ttc) as total FROM facture'))?.total || 0;
+        const collaboratorsCount = (await safeFirst(c, 'SELECT COUNT(*) as c FROM collaborators'))?.c || 0;
+        const activeModulesCount = (await safeFirst(c, 'SELECT COUNT(*) as c FROM client_modules WHERE is_active = 1'))?.c || 0;
+        
+        return c.json({ 
+            clientsCount, 
+            revenue: `${new Intl.NumberFormat('fr-FR').format(revenue || 0)} €`, 
+            activeModulesCount, 
+            collaboratorsCount 
+        });
+    } catch (e) { return c.json({ clientsCount: 0, revenue: '0 €', activeModulesCount: 0, collaboratorsCount: 0 }); }
 });
 
 app.get('/admin/clients', async (c) => {
@@ -931,7 +940,10 @@ app.get('/facture', async (c) => {
         const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
         const rows = await safeQuery(c, `SELECT ${factureCols} FROM facture WHERE client_id = ? ORDER BY created_at DESC`, [ownerId]);
         return c.json(rows.map(mapFacture) || []);
-    } catch (e) { return c.json([]); }
+    } catch (e) { 
+        console.error('GET Factures Route Error:', e);
+        return c.json([]); 
+    }
 });
 
 app.get('/facture/crm-search', async (c) => {
@@ -957,7 +969,10 @@ app.post('/facture', async (c) => {
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).bind(id, ownerId, body.invoice_number, body.customer_name, body.amount, body.status, body.due_date, body.total_ht, body.total_tva, body.total_ttc, body.already_paid, body.remaining_due, body.crm_contact_id).run();
         return c.json({ success: true, id });
-    } catch (e) { return c.json({ error: 'Erreur Facture' }, 500); }
+    } catch (e) { 
+        console.error('POST Facture Error:', e);
+        return c.json({ error: 'Erreur Facture' }, 500); 
+    }
 });
 
 app.delete('/facture/:id', async (c) => {
@@ -1218,14 +1233,23 @@ app.get('/client/stats', async (c) => {
         const eventsRes = await safeFirst(c, 'SELECT COUNT(*) as total FROM evenementiel WHERE client_id = ?', [ownerId]);
         const collabRes = await safeFirst(c, 'SELECT COUNT(*) as total FROM collaborators WHERE client_id = ?', [ownerId]);
         const pendingRes = await safeFirst(c, 'SELECT COUNT(*) as total FROM facture WHERE client_id = ? AND status != "paid"', [ownerId]);
+        const facturesRes = await safeFirst(c, 'SELECT COUNT(*) as total FROM facture WHERE client_id = ?', [ownerId]);
+        const employesRes = await safeFirst(c, 'SELECT COUNT(*) as total FROM employes WHERE client_id = ?', [ownerId]);
+        const planningRes = await safeFirst(c, 'SELECT COUNT(*) as total FROM planning WHERE client_id = ?', [ownerId]);
 
         return c.json({
             revenue: revenueRes?.total || 0,
             evenements: eventsRes?.total || 0,
             collaborators: collabRes?.total || 0,
-            factures: pendingRes?.total || 0
+            factures: facturesRes?.total || 0,
+            pendingFactures: pendingRes?.total || 0,
+            employes: employesRes?.total || 0,
+            planning: planningRes?.total || 0
         });
-    } catch (e) { return c.json({ revenue: 0, evenements: 0, collaborators: 0, factures: 0 }); }
+    } catch (e) { 
+        console.error('GET Client Stats Error:', e);
+        return c.json({ revenue: 0, evenements: 0, collaborators: 0, factures: 0, pendingFactures: 0, employes: 0, planning: 0 }); 
+    }
 });
 
 app.post('/admin/support/tickets/:id/messages', async (c) => {
