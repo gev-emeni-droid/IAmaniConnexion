@@ -596,7 +596,7 @@ body { margin: 0; padding: 0; background: #ffffff; }
             clientCity,
             clientPostalCode,
             clientCountry,
-            crmContactId: selectedCrmContactId || null,
+            crm_contact_id: selectedCrmContactId || null,
             recipientEmail: recipientEmail.trim(),
             coverCount,
             amountAlreadyPaid: alreadyPaidValue,
@@ -1147,12 +1147,12 @@ body { margin: 0; padding: 0; background: #ffffff; }
                 >
                     <div className="invoice-keep-together flex justify-between items-start mb-6 gap-6">
                         <div className="flex flex-col min-w-0">
-                            {settings.logo_url ? (
-                                <img src={settings.logo_url} alt="Logo" className="max-h-28 max-w-[250px] mb-2 object-contain self-start" />
+                            {settings.logo_url || user?.logoUrl ? (
+                                <img src={settings.logo_url || user?.logoUrl} alt="Logo" className="max-h-28 max-w-[250px] mb-2 object-contain self-start" />
                             ) : (
                                 <div className="text-sm font-black tracking-[0.2em] text-slate-500 mb-2">LOGO</div>
                             )}
-                            <h1 className="text-xl font-bold text-slate-800">{settings.company_name || 'Nom de l’établissement'}</h1>
+                            <h1 className="text-xl font-bold text-slate-800">{settings.company_name || user?.companyName || 'Nom de l’établissement'}</h1>
                             <div className="text-slate-600 text-xs mt-1 leading-snug">
                                 <p>{settings.address || '-'}</p>
                                 <p>{[settings.postal_code, settings.city].filter(Boolean).join(' ') || '-'}</p>

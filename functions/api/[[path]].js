@@ -105,12 +105,34 @@ app.post('/auth/login', async (c) => {
         }
         const client = await safeFirst(c, `SELECT ${clientCols} FROM clients WHERE email = ? OR username = ?`, [identifier, identifier]);
         if (client) {
-            const user = { id: String(client.id), name: String(client.name || client.username || client.company_name || 'Client'), companyName: String(client.company_name || ''), email: String(client.email || ''), type: 'client', role: 'client' };
+            const user = { 
+                id: String(client.id), 
+                name: String(client.name || client.username || client.company_name || 'Client'), 
+                companyName: String(client.company_name || ''), 
+                logoUrl: String(client.logo_url || ''),
+                email: String(client.email || ''), 
+                type: 'client', 
+                role: 'client' 
+            };
             return c.json({ token: await sign(user, getSecret(c)), user });
         }
-        const collab = await safeFirst(c, `SELECT ${collabCols} FROM collaborators WHERE email = ? OR username = ?`, [identifier, identifier]);
+        const collab = await safeFirst(c, `
+            SELECT col.*, cl.company_name, cl.logo_url 
+            FROM collaborators col 
+            JOIN clients cl ON col.client_id = cl.id 
+            WHERE col.email = ? OR col.username = ?
+        `, [identifier, identifier]);
         if (collab) {
-            const user = { id: String(collab.id), client_id: String(collab.client_id), name: String(collab.name), type: 'collaborator', role: String(collab.role || 'staff'), modules: typeof collab.modules_access === 'string' ? JSON.parse(collab.modules_access || '[]') : (collab.modules_access || []) };
+            const user = { 
+                id: String(collab.id), 
+                client_id: String(collab.client_id), 
+                name: String(collab.name), 
+                companyName: String(collab.company_name || ''),
+                logoUrl: String(collab.logo_url || ''),
+                type: 'collaborator', 
+                role: String(collab.role || 'staff'), 
+                modules: typeof collab.modules_access === 'string' ? JSON.parse(collab.modules_access || '[]') : (collab.modules_access || []) 
+            };
             return c.json({ token: await sign(user, getSecret(c)), user });
         }
         return c.json({ error: 'Inconnu ou Identifiants incorrects' }, 401);
@@ -119,9 +141,52 @@ app.post('/auth/login', async (c) => {
 
 app.get('/auth/me', async (c) => {
     try {
-        const user = await getUserFromReq(c);
-        if (!user) return c.json({ error: 'Session expirée' }, 401);
-        return c.json(user);
+        const payload = await getUserFromReq(c);
+        if (!payload) return c.json({ error: 'Session expirée' }, 401);
+
+        if (payload.type === 'admin') {
+            const admin = await safeFirst(c, `SELECT ${adminCols} FROM admins WHERE id = ?`, [payload.id]);
+            const adminUser = admin ? { id: String(admin.id), name: String(admin.name || 'Super Admin'), email: String(admin.email), type: 'admin', role: 'superadmin', permissions: ['all'] } : superAdminPayload;
+            return c.json(adminUser);
+        }
+
+        if (payload.type === 'client') {
+            const client = await safeFirst(c, `SELECT ${clientCols} FROM clients WHERE id = ?`, [payload.id]);
+            if (!client) return c.json({ error: 'Client introuvable' }, 404);
+            const user = { 
+                id: String(client.id), 
+                name: String(client.name || client.username || client.company_name || 'Client'), 
+                companyName: String(client.company_name || ''), 
+                logoUrl: String(client.logo_url || ''),
+                email: String(client.email || ''), 
+                type: 'client', 
+                role: 'client' 
+            };
+            return c.json(user);
+        }
+
+        if (payload.type === 'collaborator') {
+            const collab = await safeFirst(c, `
+                SELECT col.*, cl.company_name, cl.logo_url 
+                FROM collaborators col 
+                JOIN clients cl ON col.client_id = cl.id 
+                WHERE col.id = ?
+            `, [payload.id]);
+            if (!collab) return c.json({ error: 'Collaborateur introuvable' }, 404);
+            const user = { 
+                id: String(collab.id), 
+                client_id: String(collab.client_id), 
+                name: String(collab.name), 
+                companyName: String(collab.company_name || ''),
+                logoUrl: String(collab.logo_url || ''),
+                type: 'collaborator', 
+                role: String(collab.role || 'staff'), 
+                modules: typeof collab.modules_access === 'string' ? JSON.parse(collab.modules_access || '[]') : (collab.modules_access || []) 
+            };
+            return c.json(user);
+        }
+
+        return c.json(payload);
     } catch (e) { return c.json({ error: 'Erreur' }, 500); }
 });
 
