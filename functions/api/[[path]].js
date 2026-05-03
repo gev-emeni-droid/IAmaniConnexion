@@ -405,24 +405,7 @@ app.get('/evenementiel/staff-mappings', async (c) => {
     } catch (e) { return c.json([]); }
 });
 
-app.post('/evenementiel/staff-mappings', async (c) => {
-    try {
-        const user = await getUserFromReq(c);
-        if (!user) return c.json({ error: 'Auth' }, 401);
-        const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
-        const mappings = await c.req.json();
-        
-        // Supprimer les anciens mappings pour ce client
-        await c.env.DB.prepare('DELETE FROM staff_category_mapping WHERE client_id = ?').bind(ownerId).run();
-        
-        // Insérer les nouveaux
-        for (const [staffTypeId, categoryIds] of Object.entries(mappings)) {
-            await c.env.DB.prepare('INSERT INTO staff_category_mapping (client_id, staff_type_id, category_ids) VALUES (?, ?, ?)')
-                .bind(ownerId, staffTypeId, JSON.stringify(categoryIds)).run();
-        }
-        return c.json({ success: true });
-    } catch (e) { return c.json({ error: 'Erreur Mappings' }, 500); }
-});
+// (Mapping déplacé plus bas)
 
 app.get('/evenementiel/:id', async (c) => {
     try {
@@ -752,15 +735,17 @@ app.put('/evenementiel/staff-mappings', async (c) => {
         const user = await getUserFromReq(c);
         if (!user) return c.json({ error: 'Auth' }, 401);
         const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
-        const { mappings } = await c.req.json();
+        const body = await c.req.json();
+        const mappings = Array.isArray(body) ? body : (body.mappings || []);
+        
         await c.env.DB.prepare('DELETE FROM staff_category_mapping WHERE client_id = ?').bind(ownerId).run();
         for (const m of mappings) {
             const id = crypto.randomUUID();
-            await c.env.DB.prepare('INSERT INTO staff_category_mapping (id, client_id, staff_category_id, employee_id) VALUES (?, ?, ?, ?)')
-                .bind(id, ownerId, m.staff_category_id, m.employee_id).run();
+            await c.env.DB.prepare('INSERT INTO staff_category_mapping (id, client_id, staff_type_id, employee_id) VALUES (?, ?, ?, ?)')
+                .bind(id, ownerId, m.staff_type_id || m.staff_category_id, m.employee_id).run();
         }
         return c.json({ success: true });
-    } catch (e) { return c.json({ error: 'Erreur Mappings' }, 500); }
+    } catch (e) { console.error('PUT Mappings Error:', e); return c.json({ error: 'Erreur Mappings' }, 500); }
 });
 
 // --- CRM ---
@@ -867,6 +852,17 @@ app.get('/facture', async (c) => {
         const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
         const rows = await safeQuery(c, `SELECT ${factureCols} FROM facture WHERE client_id = ? ORDER BY created_at DESC`, [ownerId]);
         return c.json(rows.map(mapFacture) || []);
+    } catch (e) { return c.json([]); }
+});
+
+app.get('/facture/crm-search', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user) return c.json([]);
+        const q = c.req.query('q') || '';
+        const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
+        const rows = await safeQuery(c, `SELECT ${crmCols} FROM crm_contacts WHERE client_id = ? AND (company_name LIKE ? OR first_name LIKE ? OR last_name LIKE ?) LIMIT 10`, [ownerId, `%${q}%`, `%${q}%`, `%${q}%`]);
+        return c.json(rows.map(mapCrm));
     } catch (e) { return c.json([]); }
 });
 

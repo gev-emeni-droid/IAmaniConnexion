@@ -198,6 +198,43 @@ CREATE TABLE IF NOT EXISTS evenementiel_config (
     FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS staff_category_mapping (
+    id TEXT PRIMARY KEY,
+    client_id TEXT NOT NULL,
+    staff_type_id TEXT NOT NULL,
+    employee_id TEXT NOT NULL,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS rh_settings (
+    client_id TEXT PRIMARY KEY,
+    rules TEXT DEFAULT '{}',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS job_posts (
+    id TEXT PRIMARY KEY,
+    client_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS client_settings (
+    client_id TEXT PRIMARY KEY,
+    company_name TEXT,
+    phone TEXT,
+    email TEXT,
+    address TEXT,
+    postal_code TEXT,
+    city TEXT,
+    country TEXT,
+    siret TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+);
+
 -- 4. Relations Événementiel
 CREATE TABLE IF NOT EXISTS evenementiel_spaces (
     id TEXT PRIMARY KEY,
