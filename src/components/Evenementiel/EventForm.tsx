@@ -89,7 +89,8 @@ export const EventForm = ({ calendarId, month, year, onClose, onSuccess, initial
         startTime: '19:00',
         endTime: '02:00',
         numPeople: '',
-        selectedSpaceId: ''
+        selectedSpaceId: '',
+        crmContactId: ''
     });
 
     const [spaces, setSpaces] = useState<any[]>([]);
@@ -196,7 +197,8 @@ export const EventForm = ({ calendarId, month, year, onClose, onSuccess, initial
                     startTime: start.toTimeString().slice(0, 5),
                     endTime: end.toTimeString().slice(0, 5),
                     numPeople: String(initialEvent.num_people || ''),
-                    selectedSpaceId: initialEvent.spaces?.[0]?.id || ''
+                    selectedSpaceId: initialEvent.spaces?.[0]?.id || '',
+                    crmContactId: initialEvent.crm_contact_id || ''
                 });
 
                 setDocuments(Array.isArray(initialEvent.documents) ? initialEvent.documents : []);
@@ -297,6 +299,7 @@ export const EventForm = ({ calendarId, month, year, onClose, onSuccess, initial
             organizerName: contact.organizer_name || prev.organizerName,
             phone: contact.phone || prev.phone,
             email: contact.email || prev.email,
+            crmContactId: contact.id
         }));
 
         setCrmSuggestions([]);
@@ -413,7 +416,8 @@ export const EventForm = ({ calendarId, month, year, onClose, onSuccess, initial
                 assignments,
                 note_text: noteText,
                 documents,
-                taken_by_id: trackTakenBy ? (takenById || null) : null
+                taken_by_id: trackTakenBy ? (takenById || null) : null,
+                crm_contact_id: formData.crmContactId || null
             };
 
             if (isEditMode) {

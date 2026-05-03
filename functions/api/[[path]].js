@@ -372,7 +372,10 @@ app.get('/evenementiel/config', async (c) => {
             authorized_staff_categories: staff,
             spaces: spaces
         });
-    } catch (e) { return c.json({ authorized_staff_categories: [], spaces: [] }); }
+    } catch (e) { 
+        console.error('GET Evenementiel Config Error:', e);
+        return c.json({ authorized_staff_categories: [], spaces: [] }, 500); 
+    }
 });
 
 app.get('/evenementiel/calendars', async (c) => {
@@ -402,7 +405,10 @@ app.get('/evenementiel/staff-mappings', async (c) => {
         const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
         const rows = await safeQuery(c, 'SELECT * FROM staff_category_mapping WHERE client_id = ?', [ownerId]);
         return c.json(rows);
-    } catch (e) { return c.json([]); }
+    } catch (e) { 
+        console.error('GET Mappings Error:', e);
+        return c.json([], 500); 
+    }
 });
 
 // (Mapping déplacé plus bas)
@@ -469,12 +475,12 @@ app.post('/evenementiel', async (c) => {
         
         // 1. Insertion Coeur
         await c.env.DB.prepare(`
-            INSERT INTO evenementiel (id, client_id, calendar_id, type, phone, email, address, start_time, end_time, num_people, documents, first_name, last_name, company_name, organizer_name, taken_by_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO evenementiel (id, client_id, calendar_id, type, phone, email, address, start_time, end_time, num_people, documents, first_name, last_name, company_name, organizer_name, taken_by_id, crm_contact_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).bind(
             id, ownerId, body.calendar_id, body.type, body.phone || '', body.email || '', body.address || '', 
             body.start_time, body.end_time, body.num_people || 0, JSON.stringify(body.documents || []), 
-            body.first_name || '', body.last_name || '', body.company_name || '', body.organizer_name || '', body.taken_by_id || null
+            body.first_name || '', body.last_name || '', body.company_name || '', body.organizer_name || '', body.taken_by_id || null, body.crm_contact_id || null
         ).run();
 
         // 2. Espaces (Mapping)
@@ -521,13 +527,13 @@ app.put('/evenementiel/:id', async (c) => {
             body.type, body.phone || '', body.email || '', body.address || '', 
             body.start_time, body.end_time, body.num_people || 0, 
             body.first_name || '', body.last_name || '', body.company_name || '', 
-            body.organizer_name || '', taken_by,
+            body.organizer_name || '', taken_by, body.crm_contact_id || null,
             id, ownerId
         ];
         await c.env.DB.prepare(`
             UPDATE evenementiel SET 
             type = ?, phone = ?, email = ?, address = ?, start_time = ?, end_time = ?, 
-            num_people = ?, first_name = ?, last_name = ?, company_name = ?, organizer_name = ?, taken_by_id = ?
+            num_people = ?, first_name = ?, last_name = ?, company_name = ?, organizer_name = ?, taken_by_id = ?, crm_contact_id = ?
             WHERE id = ? AND client_id = ?
         `).bind(...validParams).run();
 
@@ -567,7 +573,10 @@ app.put('/evenementiel/:id', async (c) => {
         }
         
         return c.json({ success: true });
-    } catch (e) { console.error('PUT Event Error:', e); return c.json({ error: 'Erreur Maj 500' }, 500); }
+    } catch (e) { 
+        console.error('PUT Event Error:', e); 
+        return c.json({ error: 'Erreur Maj 500' }, 500); 
+    }
 });
 
 app.delete('/evenementiel/:id', async (c) => {
@@ -591,7 +600,10 @@ app.put('/evenementiel/config', async (c) => {
         await c.env.DB.prepare('INSERT OR REPLACE INTO evenementiel_config (client_id, track_taken_by, allowed_taker_employee_ids, notify_recipient_employee_ids, updated_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)')
             .bind(ownerId, body.track_taken_by ? 1 : 0, JSON.stringify(body.allowed_taker_employee_ids || []), JSON.stringify(body.notify_recipient_employee_ids || [])).run();
         return c.json({ success: true });
-    } catch (e) { return c.json({ error: 'Erreur Config' }, 500); }
+    } catch (e) { 
+        console.error('PUT Evenementiel Config Error:', e);
+        return c.json({ error: 'Erreur Config' }, 500); 
+    }
 });
 
 // --- (Doublons supprimés par priorité) ---
@@ -741,7 +753,7 @@ app.put('/evenementiel/staff-mappings', async (c) => {
         await c.env.DB.prepare('DELETE FROM staff_category_mapping WHERE client_id = ?').bind(ownerId).run();
         for (const m of mappings) {
             const id = crypto.randomUUID();
-            await c.env.DB.prepare('INSERT INTO staff_category_mapping (id, client_id, staff_type_id, employee_id) VALUES (?, ?, ?, ?)')
+            await c.env.DB.prepare('INSERT INTO staff_category_mapping (id, client_id, staff_category_id, employee_id) VALUES (?, ?, ?, ?)')
                 .bind(id, ownerId, m.staff_type_id || m.staff_category_id, m.employee_id).run();
         }
         return c.json({ success: true });
@@ -793,6 +805,7 @@ app.get('/crm/contacts/:id', async (c) => {
         const matchedEvents = await safeQuery(c, `
             SELECT ${eventCols} FROM evenementiel 
             WHERE client_id = ? AND (
+                crm_contact_id = ? OR
                 (email = ? AND email != '') OR 
                 (REPLACE(phone, ' ', '') = ? AND phone != '') OR 
                 (company_name LIKE ? AND company_name != '') OR 
@@ -800,7 +813,7 @@ app.get('/crm/contacts/:id', async (c) => {
                 ((first_name || ' ' || last_name) LIKE ? AND (first_name != '' OR last_name != ''))
             )
             ORDER BY start_time DESC
-        `, [ownerId, emailMatch, phoneMatch, companyMatch, organizerMatch, fullNameMatch === '%%' ? '____' : fullNameMatch]);
+        `, [ownerId, id, emailMatch, phoneMatch, companyMatch, organizerMatch, fullNameMatch === '%%' ? '____' : fullNameMatch]);
         
         return c.json({
             ...contact,
