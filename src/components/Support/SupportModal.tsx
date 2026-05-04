@@ -7,9 +7,10 @@ interface SupportModalProps {
     open: boolean;
     onClose: () => void;
     canOpen: boolean;
+    onUnreadCountChanged?: () => void;
 }
 
-export function SupportModal({ open, onClose, canOpen }: SupportModalProps) {
+export function SupportModal({ open, onClose, canOpen, onUnreadCountChanged }: SupportModalProps) {
     const [loading, setLoading] = React.useState(false);
     const [sending, setSending] = React.useState(false);
     const [ticket, setTicket] = React.useState<any | null>(null);
@@ -25,7 +26,9 @@ export function SupportModal({ open, onClose, canOpen }: SupportModalProps) {
             setError('');
             const data = await supportApi.getOpenTicket();
             setTicket(data.ticket || null);
-            setMessages(Array.isArray(data.messages) ? data.messages : []);
+            const msgList = Array.isArray(data.messages) ? data.messages : [];
+            setMessages(msgList.sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()));
+            setError('');
         } catch (e: any) {
             setError(e?.message || 'Erreur chargement support.');
         } finally {
@@ -35,15 +38,39 @@ export function SupportModal({ open, onClose, canOpen }: SupportModalProps) {
 
     React.useEffect(() => {
         if (open && canOpen) {
+            setError('');
             loadThread();
+        } else if (!open) {
+            setError('');
         }
     }, [open, canOpen, loadThread]);
+
+    React.useEffect(() => {
+        if (open && messages.length > 0) {
+            const unreadAdminMsgIds = messages
+                .filter(m => m.sender_type === 'admin' && !m.is_read)
+                .map(m => m.id);
+            if (unreadAdminMsgIds.length > 0) {
+                supportApi.markAsRead(unreadAdminMsgIds).then(() => {
+                    if (onUnreadCountChanged) onUnreadCountChanged();
+                });
+            }
+        }
+    }, [open, messages, onUnreadCountChanged]);
 
     React.useEffect(() => {
         if (open) {
             endRef.current?.scrollIntoView({ behavior: 'smooth' });
         }
     }, [messages, open]);
+
+    // Auto-clear error after 5 seconds
+    React.useEffect(() => {
+        if (error) {
+            const timer = setTimeout(() => setError(''), 5000);
+            return () => clearTimeout(timer);
+        }
+    }, [error]);
 
     const sendMessage = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -64,6 +91,7 @@ export function SupportModal({ open, onClose, canOpen }: SupportModalProps) {
             }
 
             await supportApi.sendClientMessage({
+                ticket_id: ticket?.id,
                 message: text.trim() || null,
                 file_url: fileUrl,
                 file_name: fileName,
@@ -71,7 +99,9 @@ export function SupportModal({ open, onClose, canOpen }: SupportModalProps) {
 
             setText('');
             setFile(null);
+            setError('');
             await loadThread();
+            if (onUnreadCountChanged) onUnreadCountChanged();
         } catch (e: any) {
             setError(e?.message || 'Erreur envoi message.');
         } finally {
@@ -119,10 +149,14 @@ export function SupportModal({ open, onClose, canOpen }: SupportModalProps) {
                                     )}
 
                                     {messages.map((m) => {
-                                        const mine = m.sender_type !== 'admin';
+                                        const isFromAdmin = m.sender_type === 'admin';
                                         return (
-                                            <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
-                                                <div className={`max-w-[78%] rounded-2xl px-4 py-3 border ${mine ? 'bg-slate-100 dark:bg-[#1A1A1A] border-gray-300 dark:border-white/10 text-slate-900 dark:text-white' : 'bg-white dark:bg-black border-amber-400/40 dark:border-[#C8AA6E]/50 text-slate-900 dark:text-white'} transition-colors duration-200`}>
+                                            <div key={m.id} className={`flex ${isFromAdmin ? 'justify-start' : 'justify-end'}`}>
+                                                <div className={`max-w-[78%] rounded-2xl px-4 py-3 border ${
+                                                    isFromAdmin 
+                                                        ? 'bg-white dark:bg-black border-amber-400/40 dark:border-[#C8AA6E]/50' 
+                                                        : 'bg-slate-100 dark:bg-[#1A1A1A] border-gray-300 dark:border-white/10'
+                                                } text-slate-900 dark:text-white transition-colors duration-200`}>
                                                     {m.message && <p className="text-sm whitespace-pre-wrap">{m.message}</p>}
 
                                                     {m.file_url && (

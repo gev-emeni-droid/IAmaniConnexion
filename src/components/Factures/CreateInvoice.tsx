@@ -3,6 +3,7 @@ import { toPng } from 'html-to-image';
 import { jsPDF } from 'jspdf';
 import { Download, History, Mail, Plus, Printer, RotateCcw, Send, Settings, Trash2 } from 'lucide-react';
 import { moduleApi } from '../../lib/api';
+import { resolveLogoUrl } from '../../lib/resolveLogoUrl';
 
 // Correction : recordFactureAction n'existe pas dans ../../lib/api
 // On ajoute une version locale mock qui fait juste un appel à l'API d'historique si besoin
@@ -708,10 +709,33 @@ body { margin: 0; padding: 0; background: #ffffff; }
         wrapper.appendChild(clone);
         document.body.appendChild(wrapper);
 
+        // Convertir toutes les <img> du clone en data URI pour éviter les erreurs CORS/404
+        // que html-to-image lève comme Event (et non Error)
+        const allImgs = clone.querySelectorAll('img');
+        await Promise.all(Array.from(allImgs).map(async (img) => {
+            const src = img.getAttribute('src') || '';
+            if (!src || src.startsWith('data:')) return; // déjà data URI, rien à faire
+            try {
+                const resp = await fetch(src, { mode: 'cors', cache: 'force-cache' });
+                if (!resp.ok) throw new Error('fetch failed');
+                const blob = await resp.blob();
+                const dataUri = await new Promise<string>((res, rej) => {
+                    const reader = new FileReader();
+                    reader.onload = () => res(reader.result as string);
+                    reader.onerror = rej;
+                    reader.readAsDataURL(blob);
+                });
+                img.src = dataUri;
+            } catch {
+                // Image inaccessible : la masquer pour ne pas bloquer toPng
+                img.style.display = 'none';
+            }
+        }));
+
         try {
             // OPTIMISATION : pixelRatio réduit pour accélérer la génération et éviter de faire ramer le navigateur
             const PIXEL_RATIO = 1.5; // 1.5 = bon compromis qualité/rapidité
-            const imgData = await toPng(clone, {
+            const toPngOpts = {
                 cacheBust: true,
                 pixelRatio: PIXEL_RATIO,
                 canvasWidth: clone.scrollWidth * PIXEL_RATIO,
@@ -721,7 +745,8 @@ body { margin: 0; padding: 0; background: #ffffff; }
                 width: clone.scrollWidth,
                 height: clone.scrollHeight,
                 quality: 1,
-            });
+            };
+            const imgData = await toPng(clone, toPngOpts);
 
             const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
             const pageWidth = 210;
@@ -748,7 +773,9 @@ body { margin: 0; padding: 0; background: #ffffff; }
 
     const generatePreviewPdfBase64 = async () => {
         const pdf = await generatePreviewPdfDocument();
-        return arrayBufferToBase64(pdf.output('arraybuffer'));
+        // datauristring retourne "data:application/pdf;base64,..." — on extrait la partie base64
+        const dataUri = pdf.output('datauristring') as string;
+        return dataUri.split(',')[1];
     };
 
     const handleDownloadPdf = async () => {
@@ -802,7 +829,8 @@ body { margin: 0; padding: 0; background: #ffffff; }
             // Rafraîchir l'historique si callback fourni
             if (typeof onInvoiceSaved === 'function') onInvoiceSaved();
         } catch (e: any) {
-            // Silencieux
+            console.error('Erreur envoi facture:', e);
+            alert('Erreur lors de l\'envoi : ' + (e?.message || String(e) || 'Erreur inconnue'));
         } finally {
             setSendingEmail(false);
         }
@@ -1148,7 +1176,7 @@ body { margin: 0; padding: 0; background: #ffffff; }
                     <div className="invoice-keep-together flex justify-between items-start mb-6 gap-6">
                         <div className="flex flex-col min-w-0">
                             {settings.logo_url || user?.logoUrl ? (
-                                <img src={settings.logo_url || user?.logoUrl} alt="Logo" className="max-h-28 max-w-[250px] mb-2 object-contain self-start" />
+                                <img src={resolveLogoUrl(settings.logo_url || user?.logoUrl)} alt="Logo" className="max-h-28 max-w-[250px] mb-2 object-contain self-start" />
                             ) : (
                                 <div className="text-sm font-black tracking-[0.2em] text-slate-500 mb-2">LOGO</div>
                             )}

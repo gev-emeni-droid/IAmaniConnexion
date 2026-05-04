@@ -2,13 +2,16 @@
 export const adminApi = {
     getStats: () => apiFetch('/admin/stats'),
     getClients: () => apiFetch('/admin/clients'),
-    uploadLogo: (formData: FormData) => apiFetch('/admin/upload-logo', { method: 'POST', body: formData }),
+    getClient: (clientId: string) => apiFetch(`/admin/clients/${clientId}`),
+    uploadLogo: (logoBase64: string, mimeType: string) => apiFetch('/admin/upload-logo', { method: 'POST', body: JSON.stringify({ logoBase64, mimeType }) }),
     createClient: (payload: any) => apiFetch('/admin/clients', { method: 'POST', body: JSON.stringify(payload) }),
     impersonateClient: (clientId: string) => apiFetch(`/admin/clients/${clientId}/impersonate`, { method: 'POST' }),
     getClientFactures: (clientId: string) => apiFetch(`/admin/clients/${clientId}/factures`),
     deleteClientFacture: (clientId: string, factureId: string) => apiFetch(`/admin/clients/${clientId}/factures/${factureId}`, { method: 'DELETE' }),
     previewImportExcel: (clientId: string, formData: FormData) => apiFetch(`/admin/import-excel/${clientId}/preview`, { method: 'POST', body: formData, timeoutMs: 30000 }),
     executeImportExcel: (clientId: string, formData: FormData) => apiFetch(`/admin/import-excel/${clientId}/execute`, { method: 'POST', body: formData, timeoutMs: 120000 }),
+    previewImportEvenementiel: (clientId: string, formData: FormData) => apiFetch(`/admin/import-evenementiel/${clientId}/preview`, { method: 'POST', body: formData, timeoutMs: 30000 }),
+    executeImportEvenementiel: (clientId: string, payload: any) => apiFetch(`/admin/import-evenementiel/${clientId}/execute`, { method: 'POST', body: JSON.stringify(payload), timeoutMs: 120000 }),
     getClientModules: (clientId: string) => apiFetch(`/admin/clients/${clientId}/modules`),
     updateClientModules: (clientId: string, modules: any) => apiFetch(`/admin/clients/${clientId}/modules`, { method: 'PUT', body: JSON.stringify(modules) }),
     getCollaborators: (clientId: string) => apiFetch(`/admin/clients/${clientId}/collaborators`),
@@ -27,6 +30,10 @@ export const adminApi = {
     deleteClient: (clientId: string) => apiFetch(`/admin/clients/${clientId}`, { method: 'DELETE' }),
     resetClientPassword: (clientId: string) => apiFetch(`/admin/clients/${clientId}/reset-password`, { method: 'POST' }),
     forceResetClientPassword: (clientId: string) => apiFetch(`/admin/clients/${clientId}/force-reset-password`, { method: 'POST' }),
+    resetCollaboratorPassword: (clientId: string, collaboratorId: string) => apiFetch(`/admin/clients/${clientId}/collaborators/${collaboratorId}/reset-password`, { method: 'POST' }),
+    forceResetCollaboratorPassword: (clientId: string, collaboratorId: string) => apiFetch(`/admin/clients/${clientId}/collaborators/${collaboratorId}/force-reset-password`, { method: 'POST' }),
+    getClientPlanningConfig: (clientId: string) => apiFetch(`/admin/clients/${clientId}/planning-config`),
+    saveClientPlanningConfig: (clientId: string, payload: { absenceCodes?: string[]; extraTypes?: string[] }) => apiFetch(`/admin/clients/${clientId}/planning-config`, { method: 'POST', body: JSON.stringify(payload) }),
 };
 const API_URL = '/api';
 
@@ -98,6 +105,8 @@ export const moduleApi = {
     deleteEvenementielCalendar: (id: string) => apiFetch(`/evenementiel/calendars/${id}`, { method: 'DELETE' }),
     getEvenementielCalendarEvents: (id: string) => apiFetch(`/evenementiel/calendars/${id}/events`),
     getEvenementielSpaces: () => apiFetch('/evenementiel/spaces'),
+    createEvenementielSpace: (space: any) => apiFetch('/evenementiel/spaces', { method: 'POST', body: JSON.stringify(space) }),
+    deleteEvenementielSpace: (id: string) => apiFetch(`/evenementiel/spaces/${id}`, { method: 'DELETE' }),
     getEvenementielStaffTypes: () => apiFetch('/evenementiel/staff-types'),
     getStaffCategoryMappings: () => apiFetch('/evenementiel/staff-mappings'),
     saveStaffCategoryMappings: (mappings: any[]) => apiFetch('/evenementiel/staff-mappings', { method: 'PUT', body: JSON.stringify({ mappings }) }),
@@ -116,7 +125,7 @@ export const moduleApi = {
     getFactures: () => apiFetch('/facture'),
     searchFactureCRMContacts: (q: string) => apiFetch(`/facture/crm-search?q=${encodeURIComponent(q)}`),
     createFacture: (payload: any) => apiFetch('/facture', { method: 'POST', body: JSON.stringify(payload) }),
-    sendFactureEmail: (id: string, payload: any) => apiFetch(`/facture/${id}/send-email`, { method: 'POST', body: JSON.stringify(payload) }),
+    sendFactureEmail: (id: string, payload: any) => apiFetch(`/facture/${id}/send-email`, { method: 'POST', body: JSON.stringify(payload), timeoutMs: 30000 }),
     // Nouvelle version : envoi de facture par email (PDF généré côté serveur)
     sendFactureEmailServer: (factureId: string, to: string, invoicePayload: any, pdfBase64?: string, filename?: string) =>
         apiFetch(`/facture/${factureId}/send-email`, {
@@ -137,7 +146,7 @@ export const moduleApi = {
 };
 
 export const dashboardApi = {
-    getClientStats: () => apiFetch('/client/stats'),
+    getClientStats: () => apiFetch('/dashboard/stats'),
 };
 
 export const supportApi = {
@@ -150,4 +159,14 @@ export const supportApi = {
     getAdminTicketMessages: (ticketId: string) => apiFetch(`/admin/support/tickets/${ticketId}/messages`),
     sendAdminMessage: (ticketId: string, payload: any) => apiFetch(`/admin/support/tickets/${ticketId}/messages`, { method: 'POST', body: JSON.stringify(payload) }),
     closeTicket: (ticketId: string) => apiFetch(`/admin/support/tickets/${ticketId}/close`, { method: 'PATCH' }),
+    deleteTicket: (ticketId: string) => apiFetch(`/admin/support/tickets/${ticketId}`, { method: 'DELETE' }),
+};
+
+export const planningApi = {
+    getWeek: (date: string) => apiFetch(`/planning/week/${date}`),
+    saveWeek: (payload: any) => apiFetch('/planning/week', { method: 'POST', body: JSON.stringify(payload) }),
+    getTemplates: () => apiFetch('/planning/templates'),
+    saveTemplates: (payload: any) => apiFetch('/planning/templates', { method: 'POST', body: JSON.stringify(payload) }),
+    getSettings: () => apiFetch('/planning/settings'),
+    saveSettings: (payload: any) => apiFetch('/planning/settings', { method: 'POST', body: JSON.stringify(payload) }),
 };

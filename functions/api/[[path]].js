@@ -365,7 +365,220 @@ app.get('/admin/clients/:id/staff-types', async (c) => {
     } catch (e) { return c.json([]); }
 });
 
+
+// --- PASSWORD RESET ---
+app.post('/admin/clients/:id/reset-password', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user || user.type !== 'admin') return c.json({ error: 'Unauthorized' }, 401);
+        const id = c.req.param('id');
+        const client = await safeFirst(c, 'SELECT id, email, name FROM clients WHERE id = ?', [id]);
+        if (!client) return c.json({ error: 'Client not found' }, 404);
+        const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+        let tempPwd = '';
+        for (let i = 0; i < 10; i++) tempPwd += chars[Math.floor(Math.random() * chars.length)];
+        await c.env.DB.prepare('UPDATE clients SET password = ?, is_temporary_password = 1 WHERE id = ?').bind(tempPwd, id).run();
+        return c.json({ success: true, newPassword: tempPwd, email: client.email });
+    } catch (e) { return c.json({ error: 'Erreur reset password' }, 500); }
+});
+
+app.post('/admin/clients/:id/force-reset-password', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user || user.type !== 'admin') return c.json({ error: 'Unauthorized' }, 401);
+        const id = c.req.param('id');
+        const client = await safeFirst(c, 'SELECT id, email, name FROM clients WHERE id = ?', [id]);
+        if (!client) return c.json({ error: 'Client not found' }, 404);
+        const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+        let tempPwd = '';
+        for (let i = 0; i < 12; i++) tempPwd += chars[Math.floor(Math.random() * chars.length)];
+        await c.env.DB.prepare('UPDATE clients SET password = ?, is_temporary_password = 1 WHERE id = ?').bind(tempPwd, id).run();
+        return c.json({ success: true, newPassword: tempPwd, email: client.email });
+    } catch (e) { return c.json({ error: 'Erreur force reset password' }, 500); }
+});
+
+app.post('/admin/clients/:clientId/collaborators/:collabId/reset-password', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user || user.type !== 'admin') return c.json({ error: 'Unauthorized' }, 401);
+        const clientId = c.req.param('clientId');
+        const collabId = c.req.param('collabId');
+        const collab = await safeFirst(c, 'SELECT id, email, name FROM collaborators WHERE id = ? AND client_id = ?', [collabId, clientId]);
+        if (!collab) return c.json({ error: 'Collaborateur introuvable' }, 404);
+        const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+        let tempPwd = '';
+        for (let i = 0; i < 10; i++) tempPwd += chars[Math.floor(Math.random() * chars.length)];
+        await c.env.DB.prepare('UPDATE collaborators SET password = ? WHERE id = ? AND client_id = ?').bind(tempPwd, collabId, clientId).run();
+        return c.json({ success: true, newPassword: tempPwd, email: collab.email });
+    } catch (e) { return c.json({ error: 'Erreur reset collab password' }, 500); }
+});
+
+app.post('/admin/clients/:clientId/collaborators/:collabId/force-reset-password', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user || user.type !== 'admin') return c.json({ error: 'Unauthorized' }, 401);
+        const clientId = c.req.param('clientId');
+        const collabId = c.req.param('collabId');
+        const collab = await safeFirst(c, 'SELECT id, email, name FROM collaborators WHERE id = ? AND client_id = ?', [collabId, clientId]);
+        if (!collab) return c.json({ error: 'Collaborateur introuvable' }, 404);
+        const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+        let tempPwd = '';
+        for (let i = 0; i < 12; i++) tempPwd += chars[Math.floor(Math.random() * chars.length)];
+        await c.env.DB.prepare('UPDATE collaborators SET password = ? WHERE id = ? AND client_id = ?').bind(tempPwd, collabId, clientId).run();
+        return c.json({ success: true, newPassword: tempPwd, email: collab.email });
+    } catch (e) { return c.json({ error: 'Erreur force reset collab password' }, 500); }
+});
+
+
+// --- PASSWORD RESET ---
+app.post('/admin/clients/:id/reset-password', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user || user.type !== 'admin') return c.json({ error: 'Unauthorized' }, 401);
+        const id = c.req.param('id');
+        const client = await safeFirst(c, 'SELECT id, email, name FROM clients WHERE id = ?', [id]);
+        if (!client) return c.json({ error: 'Client not found' }, 404);
+        const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+        let tempPwd = '';
+        for (let i = 0; i < 10; i++) tempPwd += chars[Math.floor(Math.random() * chars.length)];
+        await c.env.DB.prepare('UPDATE clients SET password = ?, is_temporary_password = 1 WHERE id = ?').bind(tempPwd, id).run();
+        return c.json({ success: true, newPassword: tempPwd, email: client.email });
+    } catch (e) { return c.json({ error: 'Erreur reset password' }, 500); }
+});
+
+app.post('/admin/clients/:id/force-reset-password', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user || user.type !== 'admin') return c.json({ error: 'Unauthorized' }, 401);
+        const id = c.req.param('id');
+        const client = await safeFirst(c, 'SELECT id, email, name FROM clients WHERE id = ?', [id]);
+        if (!client) return c.json({ error: 'Client not found' }, 404);
+        const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+        let tempPwd = '';
+        for (let i = 0; i < 12; i++) tempPwd += chars[Math.floor(Math.random() * chars.length)];
+        await c.env.DB.prepare('UPDATE clients SET password = ?, is_temporary_password = 1 WHERE id = ?').bind(tempPwd, id).run();
+        return c.json({ success: true, newPassword: tempPwd, email: client.email });
+    } catch (e) { return c.json({ error: 'Erreur force reset password' }, 500); }
+});
+
+app.post('/admin/clients/:clientId/collaborators/:collabId/reset-password', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user || user.type !== 'admin') return c.json({ error: 'Unauthorized' }, 401);
+        const clientId = c.req.param('clientId');
+        const collabId = c.req.param('collabId');
+        const collab = await safeFirst(c, 'SELECT id, email, name FROM collaborators WHERE id = ? AND client_id = ?', [collabId, clientId]);
+        if (!collab) return c.json({ error: 'Collaborateur introuvable' }, 404);
+        const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+        let tempPwd = '';
+        for (let i = 0; i < 10; i++) tempPwd += chars[Math.floor(Math.random() * chars.length)];
+        await c.env.DB.prepare('UPDATE collaborators SET password = ? WHERE id = ? AND client_id = ?').bind(tempPwd, collabId, clientId).run();
+        return c.json({ success: true, newPassword: tempPwd, email: collab.email });
+    } catch (e) { return c.json({ error: 'Erreur reset collab password' }, 500); }
+});
+
+app.post('/admin/clients/:clientId/collaborators/:collabId/force-reset-password', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user || user.type !== 'admin') return c.json({ error: 'Unauthorized' }, 401);
+        const clientId = c.req.param('clientId');
+        const collabId = c.req.param('collabId');
+        const collab = await safeFirst(c, 'SELECT id, email, name FROM collaborators WHERE id = ? AND client_id = ?', [collabId, clientId]);
+        if (!collab) return c.json({ error: 'Collaborateur introuvable' }, 404);
+        const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+        let tempPwd = '';
+        for (let i = 0; i < 12; i++) tempPwd += chars[Math.floor(Math.random() * chars.length)];
+        await c.env.DB.prepare('UPDATE collaborators SET password = ? WHERE id = ? AND client_id = ?').bind(tempPwd, collabId, clientId).run();
+        return c.json({ success: true, newPassword: tempPwd, email: collab.email });
+    } catch (e) { return c.json({ error: 'Erreur force reset collab password' }, 500); }
+});
+
+// --- ADMIN PLANNING CONFIG (superadmin only) ---
+app.get('/admin/clients/:id/planning-config', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user || user.type !== 'admin') return c.json({ error: 'Unauthorized' }, 401);
+        const clientId = c.req.param('id');
+        const row = await safeFirst(c, 'SELECT payload_json FROM planning_settings WHERE client_id = ?', [clientId]);
+        const data = (row && row.payload_json) ? JSON.parse(row.payload_json) : {};
+        return c.json({
+            absenceCodes: Array.isArray(data.absenceCodes) ? data.absenceCodes : [],
+            extraTypes: Array.isArray(data.extraTypes) ? data.extraTypes : [],
+        });
+    } catch (e) {
+        console.error('[GET /admin/clients/:id/planning-config] Error:', e);
+        return c.json({ absenceCodes: [], extraTypes: [] });
+    }
+});
+
+app.post('/admin/clients/:id/planning-config', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user || user.type !== 'admin') return c.json({ error: 'Unauthorized' }, 401);
+        const clientId = c.req.param('id');
+        const body = await c.req.json();
+        const absenceCodes = Array.isArray(body.absenceCodes) ? body.absenceCodes.map((s) => String(s).trim()).filter(Boolean) : undefined;
+        const extraTypes = Array.isArray(body.extraTypes) ? body.extraTypes.map((s) => String(s).trim()).filter(Boolean) : undefined;
+
+        await c.env.DB.prepare(`
+            CREATE TABLE IF NOT EXISTS planning_settings (
+                client_id TEXT PRIMARY KEY,
+                payload_json TEXT NOT NULL DEFAULT '{}',
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        `).run();
+
+        const existing_row = await safeFirst(c, 'SELECT payload_json FROM planning_settings WHERE client_id = ?', [clientId]);
+        const existing = (existing_row && existing_row.payload_json) ? JSON.parse(existing_row.payload_json) : {};
+        if (absenceCodes !== undefined) existing.absenceCodes = absenceCodes;
+        if (extraTypes !== undefined) existing.extraTypes = extraTypes;
+
+        await c.env.DB.prepare(`
+            INSERT INTO planning_settings (client_id, payload_json)
+            VALUES (?, ?)
+            ON CONFLICT(client_id)
+            DO UPDATE SET payload_json = EXCLUDED.payload_json, updated_at = CURRENT_TIMESTAMP
+        `).bind(clientId, JSON.stringify(existing)).run();
+
+        return c.json({ success: true });
+    } catch (e) {
+        console.error('[POST /admin/clients/:id/planning-config] Error:', e);
+        return c.json({ error: 'Erreur' }, 500);
+    }
+});
+
 // --- PLANNING ---
+const ensurePlanningV2Schema = async (c) => {
+    await c.env.DB.prepare(`
+        CREATE TABLE IF NOT EXISTS planning_weeks (
+            id TEXT PRIMARY KEY,
+            client_id TEXT NOT NULL,
+            week_start TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(client_id, week_start)
+        )
+    `).run();
+
+    await c.env.DB.prepare(`
+        CREATE TABLE IF NOT EXISTS planning_templates (
+            id TEXT PRIMARY KEY,
+            client_id TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `).run();
+
+    await c.env.DB.prepare(`
+        CREATE TABLE IF NOT EXISTS planning_settings (
+            client_id TEXT PRIMARY KEY,
+            payload_json TEXT NOT NULL,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `).run();
+};
+
 app.get('/planning', async (c) => {
     try {
         const user = await getUserFromReq(c);
@@ -374,6 +587,139 @@ app.get('/planning', async (c) => {
         const rows = await safeQuery(c, 'SELECT * FROM planning WHERE client_id = ? ORDER BY start_date ASC', [ownerId]);
         return c.json(rows.map(r => ({ ...r, start_date: toISO(r.start_date), end_date: toISO(r.end_date), created_at: toISO(r.created_at) })));
     } catch (e) { return c.json([]); }
+});
+
+app.get('/planning/week/:date', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user) return c.json({ error: 'Auth' }, 401);
+        const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
+        const date = c.req.param('date');
+
+        await ensurePlanningV2Schema(c);
+
+        const row = await safeFirst(c, 'SELECT payload_json FROM planning_weeks WHERE client_id = ? AND week_start = ?', [ownerId, date]);
+        return c.json(row && row.payload_json ? JSON.parse(row.payload_json) : null);
+    } catch (e) {
+        console.error('[GET /planning/week/:date] Error:', e);
+        return c.json(null);
+    }
+});
+
+app.post('/planning/week', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user) return c.json({ error: 'Auth' }, 401);
+        const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
+        const body = await c.req.json();
+        const date = body.weekStart;
+        if (!date) return c.json({ error: 'Missing weekStart' }, 400);
+
+        await ensurePlanningV2Schema(c);
+
+        await c.env.DB.prepare(`
+            INSERT INTO planning_weeks (id, client_id, week_start, payload_json)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(client_id, week_start)
+            DO UPDATE SET payload_json = EXCLUDED.payload_json, updated_at = CURRENT_TIMESTAMP
+        `).bind(body.id || crypto.randomUUID(), ownerId, date, JSON.stringify(body)).run();
+
+        return c.json({ success: true });
+    } catch (e) {
+        console.error('[POST /planning/week] Error:', e);
+        return c.json({ error: 'Erreur' }, 500);
+    }
+});
+
+app.get('/planning/templates', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user) return c.json({ error: 'Auth' }, 401);
+        const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
+
+        await ensurePlanningV2Schema(c);
+
+        const row = await safeFirst(c, 'SELECT payload_json FROM planning_templates WHERE client_id = ?', [ownerId]);
+        return c.json(row && row.payload_json ? JSON.parse(row.payload_json) : []);
+    } catch (e) {
+        console.error('[GET /planning/templates] Error:', e);
+        return c.json([]);
+    }
+});
+
+app.post('/planning/templates', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user) return c.json({ error: 'Auth' }, 401);
+        const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
+        const body = await c.req.json();
+
+        await ensurePlanningV2Schema(c);
+
+        await c.env.DB.prepare(`
+            INSERT INTO planning_templates (id, client_id, payload_json)
+            VALUES (?, ?, ?)
+            ON CONFLICT(id)
+            DO UPDATE SET payload_json = EXCLUDED.payload_json, updated_at = CURRENT_TIMESTAMP
+        `).bind(ownerId, ownerId, JSON.stringify(body)).run();
+
+        return c.json({ success: true });
+    } catch (e) {
+        console.error('[POST /planning/templates] Error:', e);
+        return c.json({ error: 'Erreur' }, 500);
+    }
+});
+
+app.get('/planning/settings', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user) return c.json({ error: 'Auth' }, 401);
+        const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
+
+        await ensurePlanningV2Schema(c);
+
+        const row = await safeFirst(c, 'SELECT payload_json FROM planning_settings WHERE client_id = ?', [ownerId]);
+        return c.json(row && row.payload_json ? JSON.parse(row.payload_json) : {});
+    } catch (e) {
+        console.error('[GET /planning/settings] Error:', e);
+        return c.json({});
+    }
+});
+
+app.post('/planning/settings', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user) return c.json({ error: 'Auth' }, 401);
+        const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
+        const body = await c.req.json();
+
+        await ensurePlanningV2Schema(c);
+
+        const existingRow = await safeFirst(c, 'SELECT payload_json FROM planning_settings WHERE client_id = ?', [ownerId]);
+        const existing = (existingRow && existingRow.payload_json) ? JSON.parse(existingRow.payload_json) : {};
+        const isSuperAdmin = user.type === 'admin' && (user.role === 'superadmin' || user.email === 'gev-emeni@outlook.fr');
+
+        const merged = { ...existing, ...(body || {}) };
+        if (!isSuperAdmin) {
+            if (Object.prototype.hasOwnProperty.call(existing, 'absenceCodes')) merged.absenceCodes = existing.absenceCodes;
+            else delete merged.absenceCodes;
+
+            if (Object.prototype.hasOwnProperty.call(existing, 'extraTypes')) merged.extraTypes = existing.extraTypes;
+            else delete merged.extraTypes;
+        }
+
+        await c.env.DB.prepare(`
+            INSERT INTO planning_settings (client_id, payload_json)
+            VALUES (?, ?)
+            ON CONFLICT(client_id)
+            DO UPDATE SET payload_json = EXCLUDED.payload_json, updated_at = CURRENT_TIMESTAMP
+        `).bind(ownerId, JSON.stringify(merged)).run();
+
+        return c.json({ success: true });
+    } catch (e) {
+        console.error('[POST /planning/settings] Error:', e);
+        return c.json({ error: 'Erreur' }, 500);
+    }
 });
 
 // --- ÉVÉNEMENTIEL ---
@@ -870,29 +1216,49 @@ app.get('/crm/contacts/:id', async (c) => {
         // Récupérer les données liées
         const factures = await safeQuery(c, `SELECT ${factureCols} FROM facture WHERE crm_contact_id = ? AND client_id = ?`, [id, ownerId]);
         
-        // Matching intelligent ultra-permissif pour l'historique
-        const emailMatch = contact.email || '____';
-        const phoneMatch = (contact.phone || '____').replace(/\s/g, '');
-        const companyMatch = contact.company_name ? `%${contact.company_name}%` : '____';
-        const organizerMatch = contact.organizer_name ? `%${contact.organizer_name}%` : '____';
-        const firstNameMatch = contact.first_name ? `%${contact.first_name}%` : '____';
-        const lastNameMatch = contact.last_name ? `%${contact.last_name}%` : '____';
-        const fullNameMatch = `%${(contact.first_name || '')} ${(contact.last_name || '')}%`.trim();
-        
+        // Historique strict: lien CRM prioritaire, avec fallback exact pour les anciens events non relies.
+        const normalizedEmail = String(contact.email || '').trim().toLowerCase();
+        const normalizedPhone = String(contact.phone || '').replace(/[\s.\-()]/g, '');
+        const normalizedCompany = String(contact.company_name || '').trim().toLowerCase();
+        const normalizedOrganizer = String(contact.organizer_name || '').trim().toLowerCase();
+        const normalizedFirstName = String(contact.first_name || '').trim().toLowerCase();
+        const normalizedLastName = String(contact.last_name || '').trim().toLowerCase();
+
         const matchedEvents = await safeQuery(c, `
-            SELECT ${eventCols} FROM evenementiel 
+            SELECT ${eventCols} FROM evenementiel
             WHERE client_id = ? AND (
-                crm_contact_id = ? OR
-                (email = ? AND email != '') OR 
-                (REPLACE(phone, ' ', '') = ? AND phone != '') OR 
-                (company_name LIKE ? AND company_name != '') OR 
-                (organizer_name LIKE ? AND organizer_name != '') OR
-                (first_name LIKE ? AND first_name != '') OR
-                (last_name LIKE ? AND last_name != '') OR
-                ((COALESCE(first_name, '') || ' ' || COALESCE(last_name, '')) LIKE ? AND (first_name != '' OR last_name != ''))
+                crm_contact_id = ?
+                OR (
+                    (crm_contact_id IS NULL OR crm_contact_id = '') AND (
+                        (? != '' AND LOWER(TRIM(COALESCE(email, ''))) = ?)
+                        OR (? != '' AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(phone, ''), ' ', ''), '.', ''), '-', ''), '(', ''), ')', '') = ?)
+                        OR (? != '' AND LOWER(TRIM(COALESCE(company_name, ''))) = ?)
+                        OR (? != '' AND LOWER(TRIM(COALESCE(organizer_name, ''))) = ?)
+                        OR (
+                            ? != '' AND ? != ''
+                            AND LOWER(TRIM(COALESCE(first_name, ''))) = ?
+                            AND LOWER(TRIM(COALESCE(last_name, ''))) = ?
+                        )
+                    )
+                )
             )
             ORDER BY start_time DESC
-        `, [ownerId, id, emailMatch, phoneMatch, companyMatch, organizerMatch, firstNameMatch, lastNameMatch, fullNameMatch === '%%' ? '____' : fullNameMatch]);
+        `, [
+            ownerId,
+            id,
+            normalizedEmail,
+            normalizedEmail,
+            normalizedPhone,
+            normalizedPhone,
+            normalizedCompany,
+            normalizedCompany,
+            normalizedOrganizer,
+            normalizedOrganizer,
+            normalizedFirstName,
+            normalizedLastName,
+            normalizedFirstName,
+            normalizedLastName,
+        ]);
         
         return c.json({
             ...contact,
@@ -1152,11 +1518,27 @@ app.delete('/employes/posts/:id', async (c) => {
 app.get('/support/ticket/open', async (c) => {
     try {
         const user = await getUserFromReq(c);
-        if (!user) return c.json(null);
+        if (!user) return c.json({ ticket: null, messages: [] });
         const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
         const row = await safeFirst(c, 'SELECT * FROM support_tickets WHERE client_id = ? AND status = "OPEN"', [ownerId]);
-        return c.json(row);
-    } catch (e) { return c.json(null); }
+        if (!row) return c.json({ ticket: null, messages: [] });
+        
+        const messages = await safeQuery(c, 'SELECT * FROM support_messages WHERE ticket_id = ? ORDER BY created_at ASC', [row.id]);
+        return c.json({ ticket: row, messages });
+    } catch (e) { return c.json({ ticket: null, messages: [] }); }
+});
+
+app.post('/support/messages/read', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user) return c.json({ error: 'Auth' }, 401);
+        const { messageIds } = await c.req.json();
+        if (Array.isArray(messageIds) && messageIds.length > 0) {
+            const placeholders = messageIds.map(() => '?').join(',');
+            await c.env.DB.prepare(`UPDATE support_messages SET is_read = 1 WHERE id IN (${placeholders})`).bind(...messageIds).run();
+        }
+        return c.json({ success: true });
+    } catch (e) { return c.json({ error: 'Erreur' }, 500); }
 });
 
 app.post('/support/messages', async (c) => {
@@ -1259,14 +1641,43 @@ app.get('/client/stats', async (c) => {
     }
 });
 
+app.get('/dashboard/stats', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user) return c.json({ error: 'Auth' }, 401);
+        const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
+
+        const revenueRes = await safeFirst(c, 'SELECT SUM(total_ttc) as total FROM facture WHERE client_id = ?', [ownerId]);
+        const eventsRes = await safeFirst(c, 'SELECT COUNT(*) as total FROM evenementiel WHERE client_id = ?', [ownerId]);
+        const collabRes = await safeFirst(c, 'SELECT COUNT(*) as total FROM collaborators WHERE client_id = ?', [ownerId]);
+        const facturesRes = await safeFirst(c, 'SELECT COUNT(*) as total FROM facture WHERE client_id = ?', [ownerId]);
+        const pendingRes = await safeFirst(c, 'SELECT COUNT(*) as total FROM facture WHERE client_id = ? AND status != ?', [ownerId, 'PAID']);
+        const employesRes = await safeFirst(c, 'SELECT COUNT(*) as total FROM employes WHERE client_id = ?', [ownerId]);
+        const planningRes = await safeFirst(c, 'SELECT COUNT(*) as total FROM planning WHERE client_id = ?', [ownerId]);
+
+        return c.json({
+            revenue: revenueRes?.total || 0,
+            evenements: eventsRes?.total || 0,
+            collaborators: collabRes?.total || 0,
+            factures: facturesRes?.total || 0,
+            pendingFactures: pendingRes?.total || 0,
+            employes: employesRes?.total || 0,
+            planning: planningRes?.total || 0
+        });
+    } catch (e) {
+        console.error('GET Dashboard Stats Error:', e);
+        return c.json({ revenue: 0, evenements: 0, collaborators: 0, factures: 0, pendingFactures: 0, employes: 0, planning: 0 });
+    }
+});
+
 app.post('/admin/support/tickets/:id/messages', async (c) => {
     try {
         const user = await getUserFromReq(c);
         if (!user || user.role !== 'superadmin') return c.json({ error: 'Auth' }, 401);
         const body = await c.req.json();
         const msgId = crypto.randomUUID();
-        await c.env.DB.prepare('INSERT INTO support_messages (id, ticket_id, sender_user_id, sender_type, message) VALUES (?, ?, ?, "admin", ?)')
-            .bind(msgId, c.req.param('id'), user.id, body.message).run();
+        await c.env.DB.prepare('INSERT INTO support_messages (id, ticket_id, sender_user_id, sender_type, message, file_url, file_name) VALUES (?, ?, ?, "admin", ?, ?, ?)')
+            .bind(msgId, c.req.param('id'), user.id, body.message, body.file_url || null, body.file_name || null).run();
         return c.json({ success: true });
     } catch (e) { return c.json({ error: 'Erreur' }, 500); }
 });

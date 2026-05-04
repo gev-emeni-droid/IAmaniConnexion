@@ -7,6 +7,7 @@
     "dev": "tsx server.ts",
     "start": "tsx src/server/app.ts",
     "build": "vite build",
+    "deploy": "npm run build && wrangler pages deploy dist --project-name iamani --commit-dirty=true",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit"
@@ -33,6 +34,7 @@
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "pdf-parse": "^2.4.5",
+    "pdfjs-dist": "^4.10.38",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.14.0",

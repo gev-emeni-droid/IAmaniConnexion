@@ -70,6 +70,7 @@ export const EvenementielModule = () => {
     const [showNotifySelector, setShowNotifySelector] = useState(false);
     const [takerSearch, setTakerSearch] = useState('');
     const [notifySearch, setNotifySearch] = useState('');
+    const [mappingSearch, setMappingSearch] = useState('');
     const [showNotifyModal, setShowNotifyModal] = useState(false);
     const [selectedNotifyIds, setSelectedNotifyIds] = useState<string[]>([]);
     const [sendingNotifications, setSendingNotifications] = useState(false);
@@ -291,6 +292,10 @@ export const EvenementielModule = () => {
     };
 
     const handleSaveMappings = async () => {
+        if (user?.type === 'admin') {
+            setSettingsError('En mode superadmin, ouvrez ce module via "Se connecter" sur un client pour enregistrer ses paramètres.');
+            return;
+        }
         setSavingMappings(true);
         setSettingsError('');
         try {
@@ -332,6 +337,14 @@ export const EvenementielModule = () => {
                 : [...prev, normalizedId]
         ));
     };
+
+    const filteredMappingEmployees = employees.filter((emp: any) => {
+        const term = mappingSearch.trim().toLowerCase();
+        if (!term) return true;
+        const fullName = employeeName(emp).toLowerCase();
+        const email = String(emp.email || '').toLowerCase();
+        return fullName.includes(term) || email.includes(term);
+    });
 
     const eligibleNotifyEmployees = employees.filter((emp: any) => {
         const hasEmail = !!String(emp.email || '').trim();
@@ -698,7 +711,10 @@ export const EvenementielModule = () => {
                                                             </div>
                                                             <button
                                                                 type="button"
-                                                                onClick={() => setOpenCategoryId(openCategoryId === category.id ? null : category.id)}
+                                                                onClick={() => {
+                                                                    setMappingSearch('');
+                                                                    setOpenCategoryId(openCategoryId === category.id ? null : category.id);
+                                                                }}
                                                                 className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-white/10 text-gray-300 hover:bg-white/5 text-xs font-bold"
                                                             >
                                                                 <span>Sélectionner</span>
@@ -708,10 +724,19 @@ export const EvenementielModule = () => {
 
                                                         {openCategoryId === category.id && (
                                                             <div className="bg-[#050505] border border-white/10 rounded-xl p-3 max-h-52 overflow-y-auto space-y-2">
-                                                                {employees.length === 0 && (
-                                                                    <p className="text-xs text-gray-500">Aucun employé client disponible.</p>
+                                                                <div className="relative mb-2">
+                                                                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-600" />
+                                                                    <input
+                                                                        value={mappingSearch}
+                                                                        onChange={(e) => setMappingSearch(e.target.value)}
+                                                                        placeholder="Rechercher un employé..."
+                                                                        className="w-full bg-black border border-white/10 rounded-lg pl-8 pr-3 py-2 text-xs text-white outline-none focus:border-white"
+                                                                    />
+                                                                </div>
+                                                                {filteredMappingEmployees.length === 0 && (
+                                                                    <p className="text-xs text-gray-500">Aucun employé correspondant.</p>
                                                                 )}
-                                                                {employees.map((emp: any) => {
+                                                                {filteredMappingEmployees.map((emp: any) => {
                                                                     const selected = selectedIds.includes(emp.id);
                                                                     return (
                                                                         <button

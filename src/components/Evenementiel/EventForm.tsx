@@ -72,8 +72,12 @@ export const EventForm = ({ calendarId, month, year, onClose, onSuccess, initial
     // Default date: today if it's in the month, otherwise the first of the month
     const getDefaultDate = () => {
         const today = new Date();
-        if (today.getFullYear() === year && today.getMonth() + 1 === month) {
-            return today.toISOString().split('T')[0];
+        const yearNow = today.getFullYear();
+        const monthNow = today.getMonth() + 1;
+        const dayNow = today.getDate();
+        
+        if (yearNow === year && monthNow === month) {
+            return `${yearNow}-${String(monthNow).padStart(2, '0')}-${String(dayNow).padStart(2, '0')}`;
         }
         return minDate;
     };
@@ -157,11 +161,27 @@ export const EventForm = ({ calendarId, month, year, onClose, onSuccess, initial
             ]);
             const configuredSpaces = config?.spaces || [];
             const authorizedCategories = config?.authorized_staff_categories || [];
-            const allowedTakers = config?.allowed_taken_by_employees || [];
+            const employeeList = Array.isArray(e) ? e : [];
+            const allowedTakerIds = Array.isArray(config?.allowed_taker_employee_ids)
+                ? config.allowed_taker_employee_ids.map((id: any) => String(id))
+                : [];
+            const allowedTakersFromApi = Array.isArray(config?.allowed_taken_by_employees)
+                ? config.allowed_taken_by_employees
+                : [];
+            const allowedTakers = allowedTakersFromApi.length > 0
+                ? allowedTakersFromApi
+                : employeeList
+                    .filter((emp: any) => allowedTakerIds.includes(String(emp.id)))
+                    .map((emp: any) => ({
+                        id: String(emp.id),
+                        first_name: emp.first_name,
+                        last_name: emp.last_name,
+                        email: emp.email
+                    }));
 
             setSpaces(configuredSpaces);
             setStaffTypes(authorizedCategories);
-            setEmployees(e);
+            setEmployees(employeeList);
             setTrackTakenBy(!!config?.track_taken_by);
             setAllowedTakenByEmployees(allowedTakers);
 
@@ -185,6 +205,21 @@ export const EventForm = ({ calendarId, month, year, onClose, onSuccess, initial
                 const start = new Date(initialEvent.start_time);
                 const end = new Date(initialEvent.end_time);
 
+                // Helper to get local YYYY-MM-DD
+                const getLocalDateStr = (d: Date) => {
+                    const year = d.getFullYear();
+                    const month = String(d.getMonth() + 1).padStart(2, '0');
+                    const day = String(d.getDate()).padStart(2, '0');
+                    return `${year}-${month}-${day}`;
+                };
+
+                // Helper to get local HH:mm
+                const getLocalTimeStr = (d: Date) => {
+                    const hours = String(d.getHours()).padStart(2, '0');
+                    const minutes = String(d.getMinutes()).padStart(2, '0');
+                    return `${hours}:${minutes}`;
+                };
+
                 setType(initialEvent.type || 'PRIVÉ');
                 setFormData({
                     firstName: initialEvent.first_name || '',
@@ -193,9 +228,9 @@ export const EventForm = ({ calendarId, month, year, onClose, onSuccess, initial
                     organizerName: initialEvent.organizer_name || '',
                     phone: initialEvent.phone || '',
                     email: initialEvent.email || '',
-                    date: start.toISOString().slice(0, 10),
-                    startTime: start.toTimeString().slice(0, 5),
-                    endTime: end.toTimeString().slice(0, 5),
+                    date: getLocalDateStr(start),
+                    startTime: getLocalTimeStr(start),
+                    endTime: getLocalTimeStr(end),
                     numPeople: String(initialEvent.num_people || ''),
                     selectedSpaceId: initialEvent.spaces?.[0]?.id || '',
                     crmContactId: initialEvent.crm_contact_id || ''
@@ -385,9 +420,12 @@ export const EventForm = ({ calendarId, month, year, onClose, onSuccess, initial
 
             // If end time is earlier than start time, assume it's the next day
             if (formData.endTime < formData.startTime) {
-                const endDate = new Date(formData.date);
-                endDate.setDate(endDate.getDate() + 1);
-                end_time = `${endDate.toISOString().split('T')[0]}T${formData.endTime}:00`;
+                const nextDay = new Date(formData.date);
+                nextDay.setDate(nextDay.getDate() + 1);
+                const y = nextDay.getFullYear();
+                const m = String(nextDay.getMonth() + 1).padStart(2, '0');
+                const d = String(nextDay.getDate()).padStart(2, '0');
+                end_time = `${y}-${m}-${d}T${formData.endTime}:00`;
             }
 
             const requiresSpaceSelection = spaces.length > 0;

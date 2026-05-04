@@ -448,12 +448,12 @@ export const MonthlyCalendar = ({ month, year, events, configSpaces = [], onMont
 
                                                 {/* Last line: Taken by info */}
                                                 {event.taken_by_name && (
-                                                    <div className="opacity-75 italic text-[9px] break-words text-[var(--text-primary)]">Pris par : {event.taken_by_name}</div>
+                                                    <div className="opacity-75 italic text-[9px] break-words text-[var(--text-primary)]">Prise par : {event.taken_by_name}</div>
                                                 )}
                                             </button>
-                                            {(event.has_note || event.has_documents) && (
+                                            {(Boolean((event.note_text || '').trim()) || event.has_documents) && (
                                                 <div className="flex items-center gap-1 px-1 pb-0.5">
-                                                    {event.has_note && (
+                                                    {Boolean((event.note_text || '').trim()) && (
                                                         <button
                                                             onClick={(e) => { e.stopPropagation(); setNotePopup({ text: event.note_text || '' }); }}
                                                             className="w-4 h-4 rounded-full bg-red-500 hover:bg-red-600 flex items-center justify-center flex-shrink-0 transition-colors"

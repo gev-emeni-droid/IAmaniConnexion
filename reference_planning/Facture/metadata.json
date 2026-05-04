@@ -1,0 +1,5 @@
+{
+  "name": "L'IAmani - Générateur de Factures Pro",
+  "description": "Une application légère et professionnelle pour les restaurants français permettant de générer des factures conformes à partir de tickets de caisse, avec calcul automatique de la TVA (10% et 20%) et export PDF.",
+  "requestFramePermissions": []
+}

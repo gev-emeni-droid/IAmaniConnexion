@@ -1,3 +1,14 @@
+// Liste centralisée des modules disponibles pour tous les formulaires
+const ALL_MODULES = [
+    { name: 'planning', label: 'Planning' },
+    { name: 'evenementiel', label: 'Événementiel' },
+    { name: 'facture', label: 'Factures' },
+    { name: 'employes', label: 'Postes & Employés' },
+    { name: 'crm', label: 'CRM Contacts' },
+    { name: 'pdf', label: 'ConvertisseurPDF' },
+    { name: 'support', label: 'Support' },
+    { name: 'rh', label: 'RH' }
+];
 import React, { useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Link, useNavigate, useParams } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -36,17 +47,28 @@ import {
     X,
     Sun,
     Moon,
-    Save
+    Save,
+    FileJson,
+    Clock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { authApi, adminApi, moduleApi, supportApi, dashboardApi } from './lib/api';
+import { extractRowsFromPdfClient, extractEvenementielRowsFromPdfClient } from './lib/pdfExtractor';
+import { resolveLogoUrl } from './lib/resolveLogoUrl';
 import { EvenementielModule } from './components/Evenementiel/EvenementielModule';
+import { PlanningModule } from './components/Planning/PlanningModule';
 import { FacturesModule } from './components/Factures/FacturesModule';
 import { CRMModule } from './components/CRM/CRMModule';
 import { AdminEvenementielConfig } from './components/Admin/AdminEvenementielConfig';
+import { AdminPlanningConfig } from './components/Admin/AdminPlanningConfig';
 import { PostesEmployesModule } from './components/Employes/PostesEmployesModule';
+import { PlanningTableView } from './components/Planning/PlanningTableView';
 import { SupportModal } from './components/Support/SupportModal';
 import { useTheme } from './hooks/useTheme';
+
+
+// --- Vue Événementiel (doit être à la racine, avant tout JSX) ---
+
 
 // --- Components ---
 
@@ -67,10 +89,32 @@ const SidebarItem = ({ icon: Icon, label, to, active, collapsed = false }: any) 
     </Link>
 );
 
+const ExternalSidebarItem = ({ icon: Icon, label, href, collapsed = false }: any) => (
+    <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={`group flex items-center ${collapsed ? 'justify-center' : 'gap-2'} ${collapsed ? 'px-0 py-1.5' : 'px-3 py-2'} rounded-lg transition-all text-[var(--text-secondary)] hover:bg-[var(--interactive-hover)] hover:text-[var(--text-primary)]`}
+        title={collapsed ? label : undefined}
+    >
+        <span className={`inline-flex items-center justify-center ${collapsed ? 'w-8 h-8 rounded-lg group-hover:bg-[var(--interactive-hover)]' : 'w-5 h-5'} transition-all`}>
+            <Icon className="w-[18px] h-[18px] shrink-0" />
+        </span>
+        {!collapsed && <span className="font-medium text-[15px] min-w-0 truncate">{label}</span>}
+    </a>
+);
+
 const Layout = ({ children }: any) => {
-    const { user, logout, refreshUser } = useAuth();
+    const { user, logout, refreshUser, loading } = useAuth();
     const { theme, toggleTheme } = useTheme();
     const navigate = useNavigate();
+
+    React.useEffect(() => {
+        if (!loading && !user) {
+            navigate('/login');
+        }
+    }, [user, loading, navigate]);
+
     const [activeModules, setActiveModules] = React.useState<string[]>([]);
     const [showProfileModal, setShowProfileModal] = React.useState(false);
     const [profileForm, setProfileForm] = React.useState({
@@ -91,6 +135,8 @@ const Layout = ({ children }: any) => {
         }
     });
     const [supportUnreadCount, setSupportUnreadCount] = React.useState(0);
+    const [showSupportModal, setShowSupportModal] = React.useState(false);
+    const [clientSupportUnreadCount, setClientSupportUnreadCount] = React.useState(0);
 
     React.useEffect(() => {
         try {
@@ -98,9 +144,7 @@ const Layout = ({ children }: any) => {
         } catch {}
     }, [isCollapsed]);
 
-    const resolvedLogoUrl = user?.logoUrl
-        ? (String(user.logoUrl).startsWith('http') ? String(user.logoUrl) : `${window.location.origin}${String(user.logoUrl)}`)
-        : null;
+    const resolvedLogoUrl = resolveLogoUrl(user?.logoUrl);
 
     React.useEffect(() => {
         if (user && user.type !== 'admin') {
@@ -109,13 +153,21 @@ const Layout = ({ children }: any) => {
         }
     }, [user]);
 
+    if (loading) return null;
+    if (!user) return null;
+
     React.useEffect(() => {
-        if (!user || user.type !== 'admin') return;
+        if (!user) return;
         let mounted = true;
         const loadUnread = async () => {
             try {
-                const data = await supportApi.getAdminUnreadCount();
-                if (mounted) setSupportUnreadCount(Number(data?.count || 0));
+                if (user.type === 'admin') {
+                    const data = await supportApi.getAdminUnreadCount();
+                    if (mounted) setSupportUnreadCount(Number(data?.count || 0));
+                } else {
+                    const data = await supportApi.getClientUnreadCount();
+                    if (mounted) setClientSupportUnreadCount(Number(data?.count || 0));
+                }
             } catch {}
         };
         loadUnread();
@@ -134,9 +186,17 @@ const Layout = ({ children }: any) => {
                 navigate('/login');
             }
         } catch (e) {
-            // If 401/403, logout
             logout();
             navigate('/login');
+        }
+    };
+
+    const refreshClientUnreadCount = async () => {
+        if (user && user.type !== 'admin') {
+            try {
+                const data = await supportApi.getClientUnreadCount();
+                setClientSupportUnreadCount(Number(data?.count || 0));
+            } catch {}
         }
     };
 
@@ -293,6 +353,23 @@ const Layout = ({ children }: any) => {
                             {isModuleActive('crm') && <SidebarItem icon={Users} label="CRM Contacts" to="/crm" active={window.location.pathname === '/crm'} collapsed={isCollapsed} />}
                             {isModuleActive('facture') && <SidebarItem icon={FileText} label="Factures" to="/factures" active={window.location.pathname === '/factures'} collapsed={isCollapsed} />}
                             {isModuleActive('employes') && <SidebarItem icon={Users} label="Postes & Employés" to="/employes" active={window.location.pathname === '/employes'} collapsed={isCollapsed} />}
+                            {isModuleActive('convertisseur') && <ExternalSidebarItem icon={FileJson} label="ConvertisseurPDF" href="https://monconvertisseur.l-iamani.com" collapsed={isCollapsed} />}
+                            {!isCollapsed && <div className="mt-5 mb-1 px-3 text-[9px] font-bold text-slate-600 dark:text-gray-400 uppercase tracking-widest">Support</div>}
+                            <button
+                                onClick={() => setShowSupportModal(true)}
+                                className={`w-full group flex items-center ${isCollapsed ? 'justify-center' : 'gap-2'} ${isCollapsed ? 'px-0 py-1.5' : 'px-3 py-2'} rounded-lg transition-all text-[var(--text-secondary)] hover:bg-[var(--interactive-hover)] hover:text-[var(--text-primary)] relative`}
+                                title={isCollapsed ? 'Support' : undefined}
+                            >
+                                <span className={`inline-flex items-center justify-center ${isCollapsed ? 'w-8 h-8 rounded-lg group-hover:bg-[var(--interactive-hover)]' : 'w-5 h-5'} transition-all relative`}>
+                                    <MessageSquare className="w-[18px] h-[18px] shrink-0" />
+                                    {clientSupportUnreadCount > 0 && (
+                                        <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+                                            {clientSupportUnreadCount > 99 ? '99+' : clientSupportUnreadCount}
+                                        </span>
+                                    )}
+                                </span>
+                                {!isCollapsed && <span className="font-medium text-[15px] min-w-0 truncate">Contacter l'admin</span>}
+                            </button>
                         </>
                     )}
                 </nav>
@@ -340,13 +417,13 @@ const Layout = ({ children }: any) => {
             <AnimatePresence>
                 {showProfileModal && (
                     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-6 transition-colors duration-200">
-                        <motion.div
+                        <motion.div 
                             initial={{ opacity: 0, scale: 0.95 }}
                             animate={{ opacity: 1, scale: 1 }}
                             exit={{ opacity: 0, scale: 0.95 }}
-                            className="w-full max-w-md bg-white dark:bg-[#0A0A0A] rounded-2xl p-8 border border-gray-200 dark:border-white/5 transition-colors duration-200"
+                            className="w-full max-w-md bg-white dark:bg-[#0A0A0A] rounded-2xl p-8 shadow-2xl border border-gray-200 dark:border-white/5 transition-colors duration-200"
                         >
-                            <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-6">Mon Profil</h2>
+                            <h2 className="text-xl font-bold mb-6 text-slate-900 dark:text-white">Mon profil</h2>
                             <form onSubmit={handleSaveProfile} className="space-y-4">
                                 {profileError && (
                                     <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-300 text-sm">{profileError}</div>
@@ -434,19 +511,35 @@ const Layout = ({ children }: any) => {
                 >
                     {children}
                 </motion.div>
+                {user?.type !== 'admin' && (
+                    <SupportModal 
+                        open={showSupportModal} 
+                        onClose={() => {
+                            setShowSupportModal(false);
+                            refreshClientUnreadCount();
+                        }} 
+                        canOpen 
+                        onUnreadCountChanged={refreshClientUnreadCount}
+                    />
+                )}
             </main>
         </div>
     );
-};
+}
 
 // --- Views ---
 
 const LoginView = () => {
+    const { user, login } = useAuth();
+    const navigate = useNavigate();
+
+    React.useEffect(() => {
+        if (user) navigate('/');
+    }, [user, navigate]);
+
     const [identifier, setIdentifier] = React.useState('');
     const [password, setPassword] = React.useState('');
     const [error, setError] = React.useState('');
-    const { login } = useAuth();
-    const navigate = useNavigate();
     const stars = React.useMemo(() => Array.from({ length: 160 }, (_, i) => ({
         id: i,
         left: `${(i * 7.17) % 100}%`,
@@ -566,30 +659,11 @@ const DashboardView = () => {
     const [stats, setStats] = React.useState<any[]>([]);
     const [recentActivity, setRecentActivity] = React.useState<any[]>([]);
     const [loading, setLoading] = React.useState(true);
-    const [showSupportModal, setShowSupportModal] = React.useState(false);
-    const [supportUnreadCount, setSupportUnreadCount] = React.useState(0);
 
     React.useEffect(() => {
         if (user) {
             loadStats();
         }
-    }, [user]);
-
-    React.useEffect(() => {
-        if (!user || user.type === 'admin') return;
-        let mounted = true;
-        const loadUnread = async () => {
-            try {
-                const data = await supportApi.getClientUnreadCount();
-                if (mounted) setSupportUnreadCount(Number(data?.count || 0));
-            } catch {}
-        };
-        loadUnread();
-        const timer = setInterval(loadUnread, 15000);
-        return () => {
-            mounted = false;
-            clearInterval(timer);
-        };
     }, [user]);
 
     const loadStats = async () => {
@@ -606,12 +680,12 @@ const DashboardView = () => {
             } else {
                 const data = await dashboardApi.getClientStats();
                 setStats([
-                    { label: 'Employés', value: String(data.employes ?? 0), icon: Users, color: 'text-blue-400', bg: 'bg-blue-500/10' },
-                    { label: 'Événements', value: String(data.evenements ?? 0), icon: Calendar, color: 'text-purple-400', bg: 'bg-purple-500/10' },
-                    { label: 'Factures', value: String(data.factures ?? 0), icon: FileText, color: 'text-orange-400', bg: 'bg-green-500/10' },
-                    { label: 'Planning', value: String(data.planning ?? 0), icon: Briefcase, color: 'text-green-400', bg: 'bg-green-500/10' },
+                    { label: 'Employés', value: String(data?.employes ?? 0), icon: Users, color: 'text-blue-400', bg: 'bg-blue-500/10' },
+                    { label: 'Événements', value: String(data?.evenements ?? 0), icon: Calendar, color: 'text-purple-400', bg: 'bg-purple-500/10' },
+                    { label: 'Factures', value: String(data?.factures ?? 0), icon: FileText, color: 'text-orange-400', bg: 'bg-green-500/10' },
+                    { label: 'Planning', value: String(data?.planning ?? 0), icon: Briefcase, color: 'text-green-400', bg: 'bg-green-500/10' },
                 ]);
-                setRecentActivity(Array.isArray(data.recentActivity) ? data.recentActivity : []);
+                setRecentActivity(Array.isArray(data?.recentActivity) ? data.recentActivity : []);
             }
         } catch (e) {
             console.error(e);
@@ -662,7 +736,7 @@ const DashboardView = () => {
     };
 
     return (
-        <div className="space-y-10">
+    <div className="space-y-10">
             <header>
                 <h1 className="text-3xl font-bold tracking-tight text-[var(--text-primary)]">Tableau de bord</h1>
                 <p className="text-[var(--text-muted)] mt-1">
@@ -751,17 +825,9 @@ const DashboardView = () => {
                                 Voir les logs
                             </button>
                         ) : (
-                            <button
-                                onClick={() => setShowSupportModal(true)}
-                                className="bg-[var(--text-primary)] text-[var(--bg-card)] px-8 py-4 rounded-xl font-bold text-sm hover:opacity-90 transition-all shadow-lg inline-flex items-center gap-2 relative"
-                            >
-                                {supportUnreadCount > 0 && (
-                                    <span className="absolute -top-2 -right-2 min-w-6 h-6 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
-                                        {supportUnreadCount > 99 ? '99+' : supportUnreadCount}
-                                    </span>
-                                )}
-                                Contacter l'admin
-                            </button>
+                            <div className="text-[var(--text-muted)] text-sm text-center py-4">
+                                Le support est disponible dans la barre latérale.
+                            </div>
                         )}
                     </div>
                     <div className="absolute -right-10 -bottom-10 w-40 h-40 bg-[var(--interactive-hover)] rounded-full blur-3xl"></div>
@@ -769,7 +835,9 @@ const DashboardView = () => {
             </div>
 
             {user?.type !== 'admin' && (
-                <SupportModal open={showSupportModal} onClose={() => setShowSupportModal(false)} canOpen />
+                <div className="pt-6">
+                    <PlanningTableView />
+                </div>
             )}
         </div>
     );
@@ -804,7 +872,7 @@ const SupportAdminView = () => {
 
     const loadMessages = React.useCallback(async (ticketId: string) => {
         const data = await supportApi.getAdminTicketMessages(ticketId);
-        setMessages(data?.messages || []);
+        setMessages(Array.isArray(data) ? data : (data?.messages || []));
     }, []);
 
     React.useEffect(() => { loadTickets(); }, [loadTickets]);
@@ -842,6 +910,19 @@ const SupportAdminView = () => {
         setSelected(null);
         setMessages([]);
         await loadTickets();
+    };
+
+    const deleteTicket = async () => {
+        if (!selected?.id) return;
+        if (!confirm('Êtes-vous sûr de vouloir supprimer ce ticket ?')) return;
+        try {
+            await supportApi.deleteTicket(selected.id);
+            setSelected(null);
+            setMessages([]);
+            await loadTickets();
+        } catch (e) {
+            alert('Erreur lors de la suppression');
+        }
     };
 
     const isImage = (url?: string) => {
@@ -892,9 +973,14 @@ const SupportAdminView = () => {
                                     <p className="text-white font-bold">{selected.company_name || selected.client_name}</p>
                                     <p className="text-xs text-gray-500">Ticket: {selected.id}</p>
                                 </div>
-                                {selected.status === 'OPEN' && (
-                                    <button onClick={closeTicket} className="px-3 py-2 text-sm rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20">Clôturer l'incident</button>
-                                )}
+                                <div className="flex gap-2">
+                                    {selected.status === 'OPEN' && (
+                                        <button onClick={closeTicket} className="px-3 py-2 text-sm rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20">Clôturer l'incident</button>
+                                    )}
+                                    {selected.status === 'CLOSED' && (
+                                        <button onClick={deleteTicket} className="px-3 py-2 text-sm rounded-lg bg-red-600/10 text-red-500 hover:bg-red-600/20">Supprimer</button>
+                                    )}
+                                </div>
                             </div>
 
                             <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -940,6 +1026,7 @@ const SupportAdminView = () => {
 
 const AdminClientsView = () => {
     const { user } = useAuth();
+    const navigate = useNavigate();
     const [clients, setClients] = React.useState<any[]>([]);
     const [loading, setLoading] = React.useState(true);
     const [showAddModal, setShowAddModal] = React.useState(false);
@@ -992,10 +1079,17 @@ const AdminClientsView = () => {
         try {
             let uploadedLogoUrl = (newClient.logo_url || '').trim() || null;
             if (newClientLogoFile) {
-                const formData = new FormData();
-                formData.append('logo', newClientLogoFile);
-                formData.append('client_id', newClient.username || 'client');
-                const upload = await adminApi.uploadLogo(formData);
+                const logoBase64 = await new Promise<string>((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                        const result = `${reader.result ?? ''}`;
+                        const base64 = result.includes(',') ? result.split(',')[1] : result;
+                        resolve(base64);
+                    };
+                    reader.onerror = () => reject(new Error('Lecture du logo impossible'));
+                    reader.readAsDataURL(newClientLogoFile);
+                });
+                const upload = await adminApi.uploadLogo(logoBase64, newClientLogoFile.type || 'image/png');
                 uploadedLogoUrl = upload.logo_url;
             }
 
@@ -1093,48 +1187,199 @@ const AdminClientsView = () => {
                 </button>
             </div>
             {loading ? (
-                <div>Chargement...</div>
+                <div className="flex justify-center py-20">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+                </div>
             ) : clients.length === 0 ? (
-                <div className="text-gray-500">Aucun client trouvé.</div>
+                <div className="bg-[#111111] rounded-2xl border border-white/5 p-20 flex flex-col items-center justify-center text-center">
+                    <Users size={40} className="text-gray-700 mb-4" />
+                    <h3 className="text-xl font-bold mb-2 text-white">Aucun client</h3>
+                    <p className="text-gray-500 max-w-sm">Commencez par ajouter votre premier client IAmani.</p>
+                </div>
             ) : (
-                <table className="min-w-full bg-white dark:bg-[#0A0A0A] rounded-xl overflow-hidden border border-gray-200 dark:border-white/10">
-                    <thead>
-                        <tr>
-                            <th className="px-4 py-2 text-left">Nom</th>
-                            <th className="px-4 py-2 text-left">Email</th>
-                            <th className="px-4 py-2 text-left">Pseudo</th>
-                            <th className="px-4 py-2 text-left">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {clients.map(client => (
-                            <tr key={client.id} className="border-t border-gray-100 dark:border-white/10">
-                                <td className="px-4 py-2">{client.name}</td>
-                                <td className="px-4 py-2">{client.email}</td>
-                                <td className="px-4 py-2">{client.username}</td>
-                                <td className="px-4 py-2">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {clients.map(client => (
+                        <motion.div 
+                            key={client.id}
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="bg-[#111111] rounded-2xl border border-white/5 p-6 hover:border-white/20 transition-all cursor-pointer group relative overflow-hidden"
+                            onClick={() => navigate(`/admin/clients/${client.id}`)}
+                        >
+                            <div className="relative z-10">
+                                <div className="flex justify-between items-start mb-6">
+                                    <div className="w-12 h-12 bg-white/5 rounded-xl flex items-center justify-center border border-white/10 overflow-hidden">
+                                        {client.logo_url ? (
+                                            <img src={resolveLogoUrl(client.logo_url)} alt="" className="w-full h-full object-cover" />
+                                        ) : (
+                                            <Building2 className="text-gray-500" size={24} />
+                                        )}
+                                    </div>
+                                    <span className={`text-[10px] font-bold px-2 py-1 rounded uppercase tracking-widest ${
+                                        client.status === 'ACTIVE' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
+                                    }`}>
+                                        {client.status || 'ACTIVE'}
+                                    </span>
+                                </div>
+                                <h3 className="text-xl font-bold text-white mb-1 group-hover:text-blue-400 transition-colors">{client.company_name || client.name}</h3>
+                                <p className="text-gray-500 text-sm mb-4 truncate">{client.email}</p>
+                                <div className="flex items-center gap-4 text-xs text-gray-400">
+                                    <div className="flex items-center gap-1">
+                                        <ShieldCheck size={14} />
+                                        <span>@{client.username}</span>
+                                    </div>
+                                </div>
+                                <div className="mt-6 pt-4 border-t border-white/5 flex gap-2">
                                     <button
-                                        className="px-3 py-1 rounded bg-blue-600 text-white text-xs mr-2"
-                                        onClick={() => handleOpenFactures(client)}
+                                        className="flex-1 px-3 py-2 rounded-lg bg-blue-600/10 text-blue-400 text-xs font-bold hover:bg-blue-600 hover:text-white transition-all"
+                                        onClick={e => { e.stopPropagation(); handleOpenFactures(client); }}
                                     >
                                         Factures
                                     </button>
                                     <button
-                                        className="px-3 py-1 rounded bg-gray-700 text-white text-xs"
-                                        onClick={() => handleImpersonate(client.id)}
+                                        className="flex-1 px-3 py-2 rounded-lg bg-white/5 text-white text-xs font-bold hover:bg-white hover:text-black transition-all"
+                                        onClick={e => { e.stopPropagation(); handleImpersonate(client.id); }}
                                     >
                                         Se connecter
                                     </button>
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
+                                </div>
+                            </div>
+                        </motion.div>
+                    ))}
+                </div>
             )}
 
-            {/* Modals */}
-            {/* Modal Nouveau Client, Factures, Succès Création */}
-            {/* ...existing code... */}
+            {/* ── Modal Ajouter Client ── */}
+            {showAddModal && (
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                    <div className="bg-[#111111] border border-white/10 rounded-2xl p-8 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+                        <div className="flex items-center justify-between mb-6">
+                            <h2 className="text-xl font-bold text-white">Nouveau Client</h2>
+                            <button onClick={() => setShowAddModal(false)} className="text-gray-500 hover:text-white"><X size={20} /></button>
+                        </div>
+                        <form onSubmit={handleAddClient} className="space-y-4">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Nom complet</label>
+                                    <input value={newClient.name} onChange={e => setNewClient({...newClient, name: e.target.value})} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-white text-sm" placeholder="Nom du contact" />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Établissement</label>
+                                    <input value={newClient.company_name} onChange={e => setNewClient({...newClient, company_name: e.target.value})} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-white text-sm" placeholder="Brasserie / Restaurant" />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Email</label>
+                                <input type="email" value={newClient.email} onChange={e => setNewClient({...newClient, email: e.target.value})} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-white text-sm" placeholder="contact@example.com" required />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Identifiant (username)</label>
+                                <input value={newClient.username} onChange={e => setNewClient({...newClient, username: e.target.value})} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-white text-sm" placeholder="brasserie-paris" required />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Logo (fichier)</label>
+                                <input type="file" accept="image/*" onChange={e => setNewClientLogoFile(e.target.files?.[0] || null)} className="w-full text-gray-400 text-sm" />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Taux TVA</label>
+                                <div className="flex gap-2 flex-wrap mb-2">
+                                    {newClient.tva_rates.map((rate, idx) => (
+                                        <span key={idx} className="flex items-center gap-1 bg-white/10 rounded-full px-3 py-1 text-xs text-white">
+                                            {rate}%
+                                            <button type="button" onClick={() => setNewClient({...newClient, tva_rates: newClient.tva_rates.filter((_, i) => i !== idx)})} className="text-gray-400 hover:text-red-400 ml-1"><X size={10} /></button>
+                                        </span>
+                                    ))}
+                                </div>
+                                <div className="flex gap-2">
+                                    <input value={newTvaInput} onChange={e => setNewTvaInput(e.target.value)} type="number" className="flex-1 bg-black border border-white/10 rounded-lg px-3 py-2 text-white text-sm" placeholder="Ex: 10" />
+                                    <button type="button" onClick={() => { const v = parseFloat(newTvaInput); if (!isNaN(v) && v >= 0) { setNewClient({...newClient, tva_rates: [...newClient.tva_rates, v]}); setNewTvaInput(''); }}} className="px-3 py-2 bg-white/10 text-white rounded-lg text-sm hover:bg-white/20">Ajouter</button>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <input type="checkbox" id="cover-count-new" checked={newClient.enable_cover_count} onChange={e => setNewClient({...newClient, enable_cover_count: e.target.checked})} className="rounded" />
+                                <label htmlFor="cover-count-new" className="text-sm text-gray-300">Activer comptage couverts</label>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Modules actifs</label>
+                                <div className="grid grid-cols-2 gap-2">
+                                    {newClient.modules.map(m => (
+                                        <button type="button" key={m.name} onClick={() => toggleModule(m.name)} className={`px-3 py-2 rounded-lg text-xs font-bold capitalize border ${m.active ? 'border-green-500/40 bg-green-500/10 text-green-400' : 'border-white/10 text-gray-500'}`}>
+                                            {m.name}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                            <div className="flex gap-3 pt-2">
+                                <button type="button" onClick={() => setShowAddModal(false)} className="flex-1 px-4 py-2 rounded-lg border border-white/10 text-gray-400 text-sm hover:text-white">Annuler</button>
+                                <button type="submit" className="flex-1 px-4 py-2 rounded-lg bg-white text-black font-bold text-sm hover:bg-gray-200">Créer le client</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* ── Modal Succès Création ── */}
+            {successData && (
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                    <div className="bg-[#111111] border border-green-500/20 rounded-2xl p-8 w-full max-w-md text-center">
+                        <div className="w-16 h-16 bg-green-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <ShieldCheck size={32} className="text-green-400" />
+                        </div>
+                        <h2 className="text-xl font-bold text-white mb-2">Client créé !</h2>
+                        <p className="text-gray-400 text-sm mb-4">{successData.company_name || successData.name} a été ajouté avec succès.</p>
+                        {successData.tempPassword && (
+                            <div className="bg-black rounded-xl border border-white/10 p-4 mb-4">
+                                <p className="text-xs text-gray-500 mb-1">Mot de passe temporaire</p>
+                                <p className="text-lg font-mono font-bold text-white">{successData.tempPassword}</p>
+                                <p className="text-xs text-yellow-400 mt-1">À communiquer au client et lui demander de le changer.</p>
+                            </div>
+                        )}
+                        <button onClick={() => setSuccessData(null)} className="w-full px-4 py-2 rounded-lg bg-white text-black font-bold hover:bg-gray-200">Fermer</button>
+                    </div>
+                </div>
+            )}
+
+            {/* ── Modal Factures Client ── */}
+            {selectedFactureClient && (
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                    <div className="bg-[#111111] border border-white/10 rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col">
+                        <div className="flex items-center justify-between p-6 border-b border-white/10">
+                            <div>
+                                <h2 className="text-lg font-bold text-white">Factures — {selectedFactureClient.company_name || selectedFactureClient.name}</h2>
+                                <p className="text-gray-500 text-sm">{clientFactures.length} facture(s)</p>
+                            </div>
+                            <button onClick={() => { setSelectedFactureClient(null); setClientFactures([]); }} className="text-gray-500 hover:text-white"><X size={20} /></button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                            {facturesLoading ? (
+                                <div className="flex justify-center py-10"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white" /></div>
+                            ) : clientFactures.length === 0 ? (
+                                <p className="text-gray-500 text-center py-10">Aucune facture pour ce client.</p>
+                            ) : clientFactures.map((f: any) => (
+                                <div key={f.id} className="flex items-center justify-between bg-black rounded-xl border border-white/10 p-4">
+                                    <div>
+                                        <p className="text-white font-bold">{f.invoice_number || 'Facture'}</p>
+                                        <p className="text-xs text-gray-500 mt-0.5">{f.customer_name} • {f.due_date ? new Date(f.due_date).toLocaleDateString() : new Date(f.created_at).toLocaleDateString()}</p>
+                                    </div>
+                                    <div className="flex items-center gap-4">
+                                        <div className="text-right">
+                                            <p className="text-white font-bold">{new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(Number(f.total_ttc ?? f.amount ?? 0))}</p>
+                                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${f.status === 'paid' ? 'bg-green-500/10 text-green-400' : 'bg-orange-500/10 text-orange-400'}`}>{f.status}</span>
+                                        </div>
+                                        <button
+                                            disabled={deletingFactureId === String(f.id)}
+                                            onClick={() => handleDeleteFacture(f)}
+                                            className="p-2 text-red-400 hover:bg-red-500/10 rounded-lg transition-colors disabled:opacity-50"
+                                        >
+                                            <Trash2 size={16} />
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
@@ -1159,7 +1404,7 @@ const AdminClientDetailView = () => {
         username: '',
         email: '',
         role: '',
-        modules_access: ['planning'] as string[],
+        modules_access: ALL_MODULES.map(m => m.name),
         password: ''
     });
     const [newSpace, setNewSpace] = React.useState({ name: '', color: '#ffffff' });
@@ -1195,11 +1440,18 @@ const AdminClientDetailView = () => {
 
     // ── Import Excel state ──────────────────────────────────────────────────────
     const [showImportModal, setShowImportModal] = React.useState(false);
+    const [showEvenementielImportModal, setShowEvenementielImportModal] = React.useState(false);
+    const [showPlanningConfig, setShowPlanningConfig] = React.useState(false);
     const [importFile, setImportFile] = React.useState<File | null>(null);
-    const [importPreview, setImportPreview] = React.useState<any | null>(null);
+    const [evenementielImportFile, setEvenementielImportFile] = React.useState<File | null>(null);
     const [importLoading, setImportLoading] = React.useState(false);
-    const [importResult, setImportResult] = React.useState<any | null>(null);
-    const [importError, setImportError] = React.useState('');
+    const [evenementielImportLoading, setEvenementielImportLoading] = React.useState(false);
+    const [importError, setImportError] = React.useState<string | null>(null);
+    const [evenementielImportError, setEvenementielImportError] = React.useState<string | null>(null);
+    const [importPreview, setImportPreview] = React.useState<any>(null);
+    const [evenementielImportPreview, setEvenementielImportPreview] = React.useState<any>(null);
+    const [importResult, setImportResult] = React.useState<any>(null);
+    const [evenementielImportResult, setEvenementielImportResult] = React.useState<any>(null);
     const isSuperAdmin = user?.type === 'admin' && user?.email === 'gev-emeni@outlook.fr';
 
     const handleImportFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1247,25 +1499,69 @@ const AdminClientDetailView = () => {
         setImportError('');
     };
 
+    const handleCloseEvenementielImportModal = () => {
+        setEvenementielImportFile(null);
+        setEvenementielImportError(null);
+        setEvenementielImportPreview(null);
+        setEvenementielImportResult(null);
+        setShowEvenementielImportModal(false);
+    };
+
+    const handleEvenementielImportFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setEvenementielImportFile(file);
+        setEvenementielImportError(null);
+        setEvenementielImportLoading(true);
+
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+            const res = await adminApi.previewImportEvenementiel(id!, formData);
+            if (res.error) setEvenementielImportError(res.error);
+            else setEvenementielImportPreview(res);
+        } catch (e: any) {
+            setEvenementielImportError(e.message);
+        } finally {
+            setEvenementielImportLoading(false);
+        }
+    };
+
+    const executeEvenementielImport = async () => {
+        if (!evenementielImportPreview) return;
+        setEvenementielImportLoading(true);
+        setEvenementielImportError(null);
+
+        try {
+            const res = await adminApi.executeImportEvenementiel(id!, { rows: evenementielImportPreview.rows });
+            if (res.error) setEvenementielImportError(res.error);
+            else setEvenementielImportResult(res);
+        } catch (e: any) {
+            setEvenementielImportError(e.message);
+        } finally {
+            setEvenementielImportLoading(false);
+        }
+    };
+
     React.useEffect(() => {
         if (id) loadData();
     }, [id]);
 
     const loadData = async () => {
         try {
-            const [clients, m, c, s, logs] = await Promise.all([
-                adminApi.getClients(),
+            const [currentClient, m, c, s, logs] = await Promise.all([
+                adminApi.getClient(id!),
                 adminApi.getClientModules(id!),
                 adminApi.getCollaborators(id!),
                 adminApi.getSpaces(id!),
                 adminApi.getClientAuditLogs(id!)
             ]);
             const staff = await adminApi.getStaffTypes(id!);
-            const currentClient = clients.find((cl: any) => cl.id === id);
             setClient(currentClient);
             const parsedRates = (() => {
                 try {
-                    const arr = JSON.parse(currentClient.tva_rates || '[]');
+                    const raw = currentClient.tva_rates;
+                    const arr = Array.isArray(raw) ? raw : (typeof raw === 'string' && raw !== '[object Object]' ? JSON.parse(raw || '[]') : []);
                     if (Array.isArray(arr) && arr.length > 0) return arr.map(Number).filter((n: number) => Number.isFinite(n) && n >= 0);
                 } catch {}
                 return [20];
@@ -1345,10 +1641,20 @@ const AdminClientDetailView = () => {
         try {
             let nextLogoUrl = editData.logo_url;
             if (editLogoFile) {
-                const formData = new FormData();
-                formData.append('logo', editLogoFile);
-                formData.append('client_id', id || 'client');
-                const upload = await adminApi.uploadLogo(formData);
+                const reader = new FileReader();
+                const base64Promise = new Promise<string>((resolve, reject) => {
+                    reader.onload = () => {
+                        const result = reader.result as string;
+                        resolve(result.split(',')[1]);
+                    };
+                    reader.onerror = reject;
+                    reader.readAsDataURL(editLogoFile);
+                });
+                const logoBase64 = await base64Promise;
+                const upload = await adminApi.uploadLogo(logoBase64, editLogoFile.type || 'image/png');
+                if (!upload.logo_url) {
+                    throw new Error(upload.error || 'Erreur upload logo');
+                }
                 nextLogoUrl = upload.logo_url;
             }
 
@@ -1358,8 +1664,8 @@ const AdminClientDetailView = () => {
             setEditData((prev) => ({ ...prev, logo_url: nextLogoUrl }));
             setEditLogoFile(null);
             setEditMode(false);
-        } catch (e) {
-            alert('Erreur lors de la mise à jour du profil');
+        } catch (e: any) {
+            alert('Erreur lors de la mise à jour du profil: ' + (e?.message || String(e)));
         }
     };
 
@@ -1432,7 +1738,7 @@ const AdminClientDetailView = () => {
 
     const handleOpenCreateCollab = () => {
         setEditingCollaboratorId(null);
-        setNewCollab({ name: '', username: '', email: '', role: '', modules_access: ['planning'], password: '' });
+        setNewCollab({ name: '', username: '', email: '', role: '', modules_access: ALL_MODULES.map(m => m.name), password: '' });
         setShowCollabModal(true);
     };
 
@@ -1449,14 +1755,13 @@ const AdminClientDetailView = () => {
         } catch {
             parsedModules = [];
         }
-
         setEditingCollaboratorId(String(collab.id));
         setNewCollab({
             name: String(collab.name || ''),
             username: String(collab.username || ''),
             email: String(collab.email || ''),
             role: String(collab.role || ''),
-            modules_access: parsedModules,
+            modules_access: ALL_MODULES.filter(m => parsedModules.includes(m.name)).map(m => m.name),
             password: ''
         });
         setShowCollabModal(true);
@@ -1594,6 +1899,18 @@ const AdminClientDetailView = () => {
         { label: 'Modules actifs', value: modules.filter((m) => Number(m.is_active) === 1).length },
     ];
 
+    if (showPlanningConfig) {
+        return (
+            <div className="min-h-screen bg-[#0A0A0A] p-4 md:p-8">
+                <AdminPlanningConfig 
+                    clientId={client.id} 
+                    clientName={client.company_name || client.name} 
+                    onBack={() => setShowPlanningConfig(false)} 
+                />
+            </div>
+        );
+    }
+
     return (
         <div className="space-y-10">
             <header className="flex flex-col md:flex-row md:items-center justify-between gap-6">
@@ -1603,7 +1920,7 @@ const AdminClientDetailView = () => {
                     </Link>
                     <div className="flex items-center gap-4">
                         <h1 className="text-3xl font-bold tracking-tight text-white">{client.name}</h1>
-                        <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                        <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest ${
                             client.status === 'active' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
                         }`}>
                             {client.status === 'active' ? 'Actif' : 'Bloqué'}
@@ -1665,14 +1982,7 @@ const AdminClientDetailView = () => {
                                     <ShieldCheck size={20} className="text-cyan-400" />
                                     Contact gestionnaire
                                 </h2>
-                                <p className="text-xs text-cyan-300/80 mt-1">Visible uniquement par vous en tant que superadmin.</p>
                             </div>
-                            <button
-                                onClick={() => setEditMode(true)}
-                                className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white/5 border border-white/10 text-white hover:bg-white/10 transition-all"
-                            >
-                                Modifier
-                            </button>
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                             <div className="rounded-xl bg-black border border-white/5 p-4">
@@ -1808,19 +2118,51 @@ const AdminClientDetailView = () => {
 
                     {/* Import Excel/PDF (SuperAdmin only) */}
                     {isSuperAdmin && (
-                    <div className="bg-[#111111] rounded-2xl p-8 border border-white/5">
-                        <h2 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
-                            <FileSpreadsheet size={20} className="text-green-400" />
-                            Import Données Excel
-                        </h2>
-                        <p className="text-sm text-gray-500 mb-6">Importer des employés et postes en masse depuis un fichier Excel ou PDF (.xlsx, .xls, .csv, .pdf).</p>
-                        <button
-                            onClick={() => setShowImportModal(true)}
-                            className="w-full bg-green-500/10 border border-green-500/30 text-green-400 py-3 rounded-xl font-bold hover:bg-green-500/20 transition-all flex items-center justify-center gap-2"
-                        >
-                            <Upload size={16} />
-                            Configurer Data (Excel)
-                        </button>
+                    <div className="bg-[#111111] rounded-2xl p-8 border border-white/5 space-y-4">
+                        <div>
+                            <h2 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
+                                <FileSpreadsheet size={20} className="text-green-400" />
+                                Import RH (Employés)
+                            </h2>
+                            <p className="text-sm text-gray-500 mb-4">Importer des employés et postes en masse (.xlsx).</p>
+                            <button
+                                onClick={() => setShowImportModal(true)}
+                                className="w-full bg-green-500/10 border border-green-500/30 text-green-400 py-3 rounded-xl font-bold hover:bg-green-500/20 transition-all flex items-center justify-center gap-2"
+                            >
+                                <Upload size={16} />
+                                Configurer RH
+                            </button>
+                        </div>
+                        
+                        <div className="pt-4 border-t border-white/5">
+                            <h2 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
+                                <Calendar size={20} className="text-blue-400" />
+                                Import Événementiel
+                            </h2>
+                            <p className="text-sm text-gray-500 mb-4">Importer des privatisations, clients CRM et staff en masse.</p>
+                            <button
+                                onClick={() => setShowEvenementielImportModal(true)}
+                                className="w-full bg-blue-500/10 border border-blue-500/30 text-blue-400 py-3 rounded-xl font-bold hover:bg-blue-500/20 transition-all flex items-center justify-center gap-2"
+                            >
+                                <Upload size={16} />
+                                Importer Événements
+                            </button>
+                        </div>
+
+                        <div className="pt-4 border-t border-white/5">
+                            <h2 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
+                                <Clock size={20} className="text-orange-400" />
+                                Config Planning
+                            </h2>
+                            <p className="text-sm text-gray-500 mb-4">Gérer les codes d'absence et types de renfort.</p>
+                            <button
+                                onClick={() => setShowPlanningConfig(true)}
+                                className="w-full bg-orange-500/10 border border-orange-500/30 text-orange-400 py-3 rounded-xl font-bold hover:bg-orange-500/20 transition-all flex items-center justify-center gap-2"
+                            >
+                                <Settings size={16} />
+                                Configurer Planning
+                            </button>
+                        </div>
                     </div>
                     )}
                 </div>
@@ -2199,7 +2541,7 @@ const AdminClientDetailView = () => {
                                                 value={editTvaInput}
                                                 onChange={(e) => setEditTvaInput(e.target.value)}
                                                 placeholder="Ex: 20"
-                                                className="w-32 px-3 py-2 rounded-lg bg-slate-50 dark:bg-black border border-gray-300 dark:border-white/10 text-slate-900 dark:text-white focus:border-slate-400 dark:focus:border-white outline-none text-sm transition-colors duration-200"
+                                                className="w-32 px-3 py-2 rounded-lg bg-slate-50 dark:bg-black border border-gray-300 dark:border-white/10 text-slate-900 dark:text-white focus:border-slate-400 dark:focus:border-white outline-none transition-colors duration-200"
                                                 onKeyDown={(e) => {
                                                     if (e.key === 'Enter') {
                                                         e.preventDefault();
@@ -2307,7 +2649,6 @@ const AdminClientDetailView = () => {
                             initial={{ opacity: 0, scale: 0.95 }}
                             animate={{ opacity: 1, scale: 1 }}
                             exit={{ opacity: 0, scale: 0.95 }}
-                            transition={{ duration: 0.2 }}
                             className="w-full max-w-md bg-white dark:bg-[#0A0A0A] rounded-2xl shadow-2xl border border-gray-200 dark:border-white/5 my-auto flex flex-col max-h-[90vh] transition-colors duration-200"
                         >
                             {/* Contenu défilable */}
@@ -2339,8 +2680,7 @@ const AdminClientDetailView = () => {
                                     <p className="text-[11px] text-gray-600">Utilisé pour se connecter à la place de l'email.</p>
                                 </div>
                                 <div className="space-y-2">
-                                    <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">
-                                        Email <span className="text-gray-600 font-normal normal-case">(optionnel)</span>
+                                    <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Email <span className="text-gray-600 font-normal normal-case">(optionnel)</span>
                                     </label>
                                     <input 
                                         type="email"
@@ -2379,20 +2719,14 @@ const AdminClientDetailView = () => {
                                 <div className="space-y-3 pt-2">
                                     <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Accès Modules</label>
                                     <div className="grid grid-cols-2 gap-3">
-                                        {[
-                                            { value: 'planning', label: 'Planning' },
-                                            { value: 'evenementiel', label: 'Événementiel' },
-                                            { value: 'crm', label: 'CRM' },
-                                            { value: 'facture', label: 'Factures' },
-                                            { value: 'employes', label: 'RH' }
-                                        ].map((m) => {
-                                            const checked = newCollab.modules_access.includes(m.value);
+                                        {ALL_MODULES.map((m) => {
+                                            const checked = newCollab.modules_access.includes(m.name);
                                             return (
-                                                <label key={m.value} className={`flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer transition-all ${checked ? 'border-slate-300 dark:border-white/30 bg-slate-100 dark:bg-white/5 text-slate-900 dark:text-white' : 'border-gray-300 dark:border-white/10 text-slate-500 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white'}`}>
+                                                <label key={m.name} className={`flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer transition-all ${checked ? 'border-slate-300 dark:border-white/30 bg-slate-100 dark:bg-white/5 text-slate-900 dark:text-white' : 'border-gray-300 dark:border-white/10 text-slate-500 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white'}`}>
                                                     <input
                                                         type="checkbox"
                                                         checked={checked}
-                                                        onChange={() => toggleCollaboratorModule(m.value)}
+                                                        onChange={() => toggleCollaboratorModule(m.name)}
                                                         className="accent-white"
                                                     />
                                                     <span className="text-sm font-medium">{m.label}</span>
@@ -2490,7 +2824,7 @@ const AdminClientDetailView = () => {
                 )}
             </AnimatePresence>
 
-            {/* Modal Import Excel/PDF */}
+            {/* Modal Import Excel */}
             <AnimatePresence>
                 {showImportModal && isSuperAdmin && (
                     <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-50 flex items-center justify-center p-6 transition-colors duration-200">
@@ -2500,163 +2834,92 @@ const AdminClientDetailView = () => {
                             exit={{ opacity: 0, scale: 0.95 }}
                             className="w-full max-w-xl max-h-[85vh] bg-white dark:bg-[#0A0A0A] rounded-3xl border border-gray-200 dark:border-white/10 shadow-2xl overflow-hidden flex flex-col transition-colors duration-200"
                         >
-                            <div className="p-6 bg-slate-100 dark:bg-[#111111] border-b border-gray-200 dark:border-white/5 flex items-center justify-between transition-colors duration-200">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 bg-green-500/10 rounded-xl flex items-center justify-center">
-                                        <FileSpreadsheet size={20} className="text-green-400" />
+                            <div className="p-6 border-b border-white/5 flex items-center justify-between">
+                                <div className="flex items-center gap-4">
+                                    <div className="w-10 h-10 bg-green-500/10 rounded-xl flex items-center justify-center text-green-400">
+                                        <FileText size={20} />
                                     </div>
                                     <div>
-                                        <h3 className="text-lg font-bold text-slate-900 dark:text-white">Import Excel / PDF — {client.name}</h3>
-                                        <p className="text-xs text-slate-500 dark:text-gray-500">Employés & Postes en masse</p>
+                                        <h3 className="text-lg font-bold text-white">Import Excel — {client?.company_name}</h3>
+                                        <p className="text-xs text-gray-500">Employés & Postes en masse</p>
                                     </div>
                                 </div>
-                                <button onClick={handleCloseImportModal} className="p-2 rounded-lg text-slate-500 dark:text-gray-400 hover:bg-slate-200 dark:hover:bg-white/5 transition-colors duration-200">
-                                    <X size={18} />
+                                <button onClick={handleCloseImportModal} className="p-2 hover:bg-white/5 rounded-xl text-gray-500 transition-all">
+                                    <X size={20} />
                                 </button>
                             </div>
 
-                            <div
-                                className="p-6 pr-2 space-y-6 flex-1 min-h-0 overflow-y-auto"
-                                style={{ scrollbarWidth: 'thin', scrollbarColor: '#333 transparent' }}
-                            >
-                                {/* Zone de dépôt du fichier */}
+                            <div className="flex-1 overflow-y-auto p-6">
                                 {!importResult && (
-                                    <div>
-                                        <p className="text-xs text-gray-500 mb-3 font-bold uppercase tracking-widest">Format attendu</p>
-                                        <div className="bg-white/[0.03] rounded-xl border border-white/5 p-4 text-xs text-gray-400 font-mono mb-4">
-                                            <span className="text-green-400">Nom</span> · <span className="text-green-400">Prénom</span> · <span className="text-green-400">Poste</span> · <span className="text-gray-500">Email</span> · <span className="text-gray-500">Téléphone</span>
-                                            <br /><span className="text-gray-600">(Email et Téléphone optionnels)</span>
-                                        </div>
-                                        <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-white/10 rounded-2xl cursor-pointer hover:border-green-500/40 hover:bg-green-500/5 transition-all">
-                                            <Upload size={24} className="text-gray-500 mb-2" />
-                                            <span className="text-sm text-gray-400 font-medium">
-                                                {importFile ? importFile.name : 'Cliquer pour sélectionner un fichier Excel ou PDF'}
-                                            </span>
-                                            <span className="text-xs text-gray-600 mt-1">.xlsx · .xls · .csv · .pdf</span>
-                                            <input
-                                                type="file"
-                                                accept=".xlsx,.xls,.csv,.pdf"
-                                                className="hidden"
-                                                onChange={handleImportFileChange}
-                                            />
-                                        </label>
-                                    </div>
-                                )}
-
-                                {/* Chargement */}
-                                {importLoading && (
-                                    <div className="flex items-center justify-center gap-3 py-6 text-gray-400">
-                                        <div className="w-5 h-5 border-2 border-white/20 border-t-green-400 rounded-full animate-spin" />
-                                        <span className="text-sm">{importPreview ? 'Importation en cours...' : 'Analyse du fichier...'}</span>
-                                    </div>
-                                )}
-
-                                {/* Erreur */}
-                                {importError && (
-                                    <div className="flex items-start gap-3 bg-red-500/10 border border-red-500/20 rounded-xl p-4">
-                                        <AlertCircle size={18} className="text-red-400 flex-shrink-0 mt-0.5" />
-                                        <p className="text-sm text-red-400">{importError}</p>
-                                    </div>
-                                )}
-
-                                {/* Résumé preview */}
-                                {importPreview && !importLoading && (
-                                    <div className="space-y-4">
-                                        <div className="bg-white/[0.03] rounded-2xl border border-white/5 p-5 space-y-3">
-                                            <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Analyse Flash</p>
-                                            <p className="text-[11px] text-gray-500">Source détectée : <span className="text-white font-bold uppercase">{importPreview.source_type || 'excel'}</span></p>
-                                            <div className="grid grid-cols-3 gap-4">
-                                                <div className="text-center">
-                                                    <p className="text-2xl font-bold text-white">{importPreview.valid_employees}</p>
-                                                    <p className="text-xs text-gray-500 mt-1">Employés</p>
-                                                </div>
-                                                <div className="text-center">
-                                                    <p className="text-2xl font-bold text-green-400">{importPreview.new_posts?.length ?? 0}</p>
-                                                    <p className="text-xs text-gray-500 mt-1">Nouveaux postes</p>
-                                                </div>
-                                                <div className="text-center">
-                                                    <p className="text-2xl font-bold text-orange-400">{importPreview.errors?.length ?? 0}</p>
-                                                    <p className="text-xs text-gray-500 mt-1">Avertissements</p>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        {importPreview.new_posts?.length > 0 && (
+                                    <div className="space-y-6">
+                                        {!importPreview && (
                                             <div>
-                                                <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">Postes à créer</p>
-                                                <div className="flex flex-wrap gap-2">
-                                                    {importPreview.new_posts.map((p: string) => (
-                                                        <span key={p} className="px-3 py-1 bg-green-500/10 border border-green-500/20 rounded-full text-xs font-bold text-green-400">{p}</span>
-                                                    ))}
+                                                <p className="text-xs text-gray-500 mb-3 font-bold uppercase tracking-widest">Format attendu</p>
+                                                <div className="bg-white/[0.03] rounded-xl border border-white/5 p-4 text-xs text-gray-400 font-mono mb-4">
+                                                    <span className="text-white font-bold">Nom</span> · <span className="text-green-400">Prénom</span> · <span className="text-blue-400">Poste</span> · Email · Téléphone
+                                                    <br />
+                                                    <span className="text-[10px] text-gray-500">(Email et Téléphone optionnels)</span>
                                                 </div>
+                                                <label className="flex flex-col items-center justify-center w-full h-40 border-2 border-dashed border-white/10 rounded-2xl cursor-pointer hover:border-blue-500/40 hover:bg-blue-500/5 transition-all">
+                                                    <Upload size={32} className="text-gray-500 mb-3" />
+                                                    <span className="text-sm text-gray-400 font-medium">
+                                                        Cliquer pour sélectionner un fichier Excel
+                                                    </span>
+                                                    <span className="text-[10px] text-gray-500 mt-1">.xlsx, .xls, .csv</span>
+                                                    <input 
+                                                        type="file" 
+                                                        accept=".xlsx,.xls,.csv" 
+                                                        className="hidden" 
+                                                        onChange={handleImportFileChange} 
+                                                    />
+                                                </label>
                                             </div>
                                         )}
-                                        {importPreview.errors?.length > 0 && (
-                                            <div>
-                                                <p className="text-xs font-bold text-orange-400/80 uppercase tracking-widest mb-2">Avertissements</p>
-                                                <div className="space-y-1 max-h-24 overflow-y-auto">
-                                                    {importPreview.errors.map((err: string, i: number) => (
-                                                        <p key={i} className="text-xs text-orange-400/70">{err}</p>
-                                                    ))}
-                                                </div>
+
+                                        {importLoading && (
+                                            <div className="flex items-center justify-center gap-3 py-6 text-gray-400">
+                                                <div className="w-5 h-5 border-2 border-white/20 border-t-green-400 rounded-full animate-spin" />
+                                                <span className="text-sm">{importPreview ? 'Importation en cours...' : 'Analyse du fichier...'}</span>
                                             </div>
                                         )}
-                                        {importPreview.detected_employees?.length > 0 && (
-                                            <div>
-                                                <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">Aperçu des employés détectés</p>
-                                                <div className="border border-white/10 rounded-xl overflow-hidden max-h-56 overflow-y-auto">
-                                                    <table className="w-full text-xs">
-                                                        <thead className="bg-white/5 sticky top-0">
-                                                            <tr className="text-left text-gray-400">
-                                                                <th className="px-3 py-2">Nom</th>
-                                                                <th className="px-3 py-2">Prénom</th>
-                                                                <th className="px-3 py-2">Poste</th>
-                                                                <th className="px-3 py-2">Tel</th>
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            {importPreview.detected_employees.map((emp: any, i: number) => (
-                                                                <tr key={i} className="border-t border-white/5 text-gray-200">
-                                                                    <td className="px-3 py-2">{emp.last_name}</td>
-                                                                    <td className="px-3 py-2">{emp.first_name}</td>
-                                                                    <td className="px-3 py-2">{emp.position}</td>
-                                                                    <td className="px-3 py-2">{emp.phone || '-'}</td>
-                                                                </tr>
-                                                            ))}
-                                                        </tbody>
-                                                    </table>
+
+                                        {importError && (
+                                            <div className="flex items-start gap-3 bg-red-500/10 border border-red-500/20 rounded-xl p-4">
+                                                <AlertCircle size={18} className="text-red-400 flex-shrink-0 mt-0.5" />
+                                                <p className="text-sm text-red-400">{importError}</p>
+                                            </div>
+                                        )}
+
+                                        {importPreview && !importLoading && (
+                                            <div className="space-y-4">
+                                                <div className="bg-white/[0.03] rounded-2xl border border-white/5 p-5 space-y-3">
+                                                    <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Analyse Flash</p>
+                                                    <div className="grid grid-cols-3 gap-4">
+                                                        <div className="text-center">
+                                                            <p className="text-2xl font-bold text-white">{importPreview.valid_employees}</p>
+                                                            <p className="text-xs text-gray-500 mt-1">Employés</p>
+                                                        </div>
+                                                        <div className="text-center">
+                                                            <p className="text-2xl font-bold text-green-400">{importPreview.new_posts?.length ?? 0}</p>
+                                                            <p className="text-xs text-gray-500 mt-1">Nouveaux postes</p>
+                                                        </div>
+                                                        <div className="text-center">
+                                                            <p className="text-2xl font-bold text-orange-400">{importPreview.errors?.length ?? 0}</p>
+                                                            <p className="text-xs text-gray-500 mt-1">Avertissements</p>
+                                                        </div>
+                                                    </div>
                                                 </div>
                                             </div>
                                         )}
                                     </div>
                                 )}
 
-                                {/* Résultat final */}
                                 {importResult && (
-                                    <div className="space-y-4">
-                                        <div className="flex items-center gap-3 bg-green-500/10 border border-green-500/20 rounded-xl p-4">
-                                            <CheckCircle2 size={20} className="text-green-400 flex-shrink-0" />
-                                            <div>
-                                                <p className="text-sm font-bold text-white">Importation réussie</p>
-                                                <p className="text-xs text-gray-400 mt-0.5">
-                                                    {importResult.employees_created} employé{importResult.employees_created > 1 ? 's' : ''} ajouté{importResult.employees_created > 1 ? 's' : ''} · {importResult.posts_created} poste{importResult.posts_created > 1 ? 's' : ''} créé{importResult.posts_created > 1 ? 's' : ''}
-                                                </p>
-                                                {typeof importResult.duplicates_skipped === 'number' && importResult.duplicates_skipped > 0 && (
-                                                    <p className="text-xs text-amber-300 mt-1">
-                                                        {importResult.duplicates_skipped} doublon{importResult.duplicates_skipped > 1 ? 's' : ''} ignoré{importResult.duplicates_skipped > 1 ? 's' : ''}
-                                                    </p>
-                                                )}
-                                            </div>
+                                    <div className="py-12 flex flex-col items-center text-center space-y-6">
+                                        <div className="w-20 h-20 bg-green-500/10 rounded-full flex items-center justify-center">
+                                            <CheckCircle2 size={40} className="text-green-400" />
                                         </div>
-                                        {importResult.errors?.length > 0 && (
-                                            <div>
-                                                <p className="text-xs font-bold text-orange-400/80 uppercase tracking-widest mb-2">Lignes ignorées</p>
-                                                <div className="space-y-1 max-h-24 overflow-y-auto">
-                                                    {importResult.errors.map((err: string, i: number) => (
-                                                        <p key={i} className="text-xs text-orange-400/70">{err}</p>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        )}
+                                        <h4 className="text-2xl font-bold text-white">Importation Terminée !</h4>
                                     </div>
                                 )}
                             </div>
@@ -2679,994 +2942,203 @@ const AdminClientDetailView = () => {
                     </div>
                 )}
             </AnimatePresence>
-        </div>
-    );
-};
 
-const EvenementielView = () => {
-    const { user } = useAuth();
-    const [calendars, setCalendars] = React.useState<any[]>([]);
-    const [selectedCalendar, setSelectedCalendar] = React.useState<any | null>(null);
-    const [events, setEvents] = React.useState<any[]>([]);
-    const [spaces, setSpaces] = React.useState<any[]>([]);
-    const [staffTypes, setStaffTypes] = React.useState<any[]>([]);
-    const [loading, setLoading] = React.useState(true);
-    const [showEventModal, setShowEventModal] = React.useState(false);
-    const [showCalendarModal, setShowCalendarModal] = React.useState(false);
-    const [showSettingsModal, setShowSettingsModal] = React.useState(false);
-    const [filter, setFilter] = React.useState('ALL');
-    const [spaceFilter, setSpaceFilter] = React.useState('ALL');
-    const [creationStep, setCreationStep] = React.useState(1);
-    
-    // Settings state
-    const [newSpace, setNewSpace] = React.useState({ name: '', color: '#ffffff' });
-    const [newStaffType, setNewStaffType] = React.useState({ name: '' });
-
-    const [newCalendar, setNewCalendar] = React.useState({
-        month: new Date().getMonth() + 1,
-        year: new Date().getFullYear()
-    });
-
-    const [newEvent, setNewEvent] = React.useState<any>({
-        type: 'PRIVÉ',
-        phone: '',
-        email: '',
-        address: '',
-        start_time: '',
-        end_time: '',
-        num_people: '',
-        staff_requests: {}, // { staff_type_id: count }
-        first_name: '',
-        last_name: '',
-        company_name: '',
-        organizer_name: '',
-        space_ids: []
-    });
-
-    React.useEffect(() => {
-        loadInitialData();
-    }, []);
-
-    const loadInitialData = async () => {
-        try {
-            setLoading(true);
-            const [cals, sps, stf] = await Promise.all([
-                moduleApi.getEvenementielCalendars(),
-                moduleApi.getEvenementielSpaces(),
-                moduleApi.getEvenementielStaffTypes()
-            ]);
-            setCalendars(cals);
-            setSpaces(sps);
-            setStaffTypes(stf);
-        } catch (e) {
-            console.error(e);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const loadEvents = async (calendarId: string) => {
-        try {
-            setLoading(true);
-            const data = await moduleApi.getEvenementielCalendarEvents(calendarId);
-            setEvents(data);
-        } catch (e) {
-            console.error(e);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleOpenCalendar = (calendar: any) => {
-        setSelectedCalendar(calendar);
-        loadEvents(calendar.id);
-    };
-
-    const handleCreateCalendar = async (e: React.FormEvent) => {
-        e.preventDefault();
-        try {
-            await moduleApi.createEvenementielCalendar(newCalendar);
-            setShowCalendarModal(false);
-            loadInitialData();
-        } catch (e) {
-            alert('Erreur lors de la création du calendrier');
-        }
-    };
-
-    const handleCreateStaffType = async (e: React.FormEvent) => {
-        e.preventDefault();
-        try {
-            await moduleApi.createEvenementielStaffType(newStaffType);
-            setNewStaffType({ name: '' });
-            loadInitialData();
-        } catch (e) {
-            alert('Erreur lors de la création du type de staff');
-        }
-    };
-
-    const handleDeleteStaffType = async (id: string) => {
-        if (!confirm('Supprimer ce type de staff ?')) return;
-        try {
-            await moduleApi.deleteEvenementielStaffType(id);
-            loadInitialData();
-        } catch (e) {
-            alert('Erreur lors de la suppression');
-        }
-    };
-
-    const handleCreateEvent = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!selectedCalendar) return;
-        try {
-            await moduleApi.createEvenementiel({
-                ...newEvent,
-                calendar_id: selectedCalendar.id
-            });
-            setShowEventModal(false);
-            setCreationStep(1);
-            setNewEvent({
-                type: 'PRIVÉ',
-                phone: '',
-                email: '',
-                address: '',
-                start_time: '',
-                end_time: '',
-                num_people: '',
-                staff_requests: {},
-                first_name: '',
-                last_name: '',
-                company_name: '',
-                organizer_name: '',
-                space_ids: []
-            });
-            loadEvents(selectedCalendar.id);
-        } catch (e: any) {
-            alert(e.message || 'Erreur lors de la création de l\'événement');
-        }
-    };
-
-    const handleDeleteEvent = async (id: string) => {
-        if (!confirm('Supprimer cet événement ?')) return;
-        try {
-            await moduleApi.deleteEvenementiel(id);
-            if (selectedCalendar) loadEvents(selectedCalendar.id);
-        } catch (e) {
-            alert('Erreur lors de la suppression');
-        }
-    };
-
-    const months = [
-        "Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
-        "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"
-    ];
-
-    const filteredEvents = events.filter(e => {
-        const typeMatch = filter === 'ALL' || e.type === filter;
-        const spaceMatch = spaceFilter === 'ALL' || (e.spaces && e.spaces.some((s: any) => s.id === spaceFilter));
-        return typeMatch && spaceMatch;
-    });
-
-    if (!selectedCalendar) {
-        return (
-            <div className="space-y-8">
-                <header className="flex items-center justify-between">
-                    <div>
-                        <h1 className="text-3xl font-bold tracking-tight text-white">Événementiel</h1>
-                        <p className="text-gray-500 mt-1">Sélectionnez un calendrier mensuel pour gérer vos événements.</p>
-                    </div>
-                    <div className="flex gap-3">
-                        <button 
-                            onClick={() => setShowSettingsModal(true)}
-                            className="bg-[#111111] border border-white/10 text-white px-4 py-3 rounded-lg font-bold flex items-center gap-2 hover:bg-white/5 transition-all"
-                        >
-                            <Settings size={20} />
-                            <span>Configuration</span>
-                        </button>
-                        <button 
-                            onClick={() => setShowCalendarModal(true)}
-                            className="bg-white text-black px-6 py-3 rounded-lg font-bold flex items-center gap-2 shadow-lg shadow-white/5 hover:bg-gray-200 transition-all"
-                        >
-                            <Plus size={20} />
-                            <span>Nouveau Calendrier</span>
-                        </button>
-                    </div>
-                </header>
-
-                {loading ? (
-                    <div className="flex justify-center py-20 text-gray-500">Chargement...</div>
-                ) : calendars.length === 0 ? (
-                    <div className="bg-[#111111] rounded-2xl border border-white/5 p-20 flex flex-col items-center justify-center text-center">
-                        <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center mb-6">
-                            <Calendar size={40} className="text-gray-700" />
-                        </div>
-                        <h3 className="text-xl font-bold mb-2 text-white">Aucun calendrier</h3>
-                        <p className="text-gray-500 max-w-sm">Créez votre premier calendrier mensuel pour commencer à ajouter des privatisations.</p>
-                    </div>
-                ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        {calendars.map((cal) => (
-                            <motion.div 
-                                key={cal.id}
-                                initial={{ opacity: 0, y: 10 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                onClick={() => handleOpenCalendar(cal)}
-                                className="bg-[#111111] rounded-2xl border border-white/5 p-8 hover:border-white/20 transition-all cursor-pointer group relative overflow-hidden"
-                            >
-                                <div className="relative z-10">
-                                    <div className="flex justify-between items-start mb-6">
-                                        <div className="w-12 h-12 bg-white/5 rounded-xl flex items-center justify-center border border-white/10">
-                                            <Calendar className="text-white" size={24} />
-                                        </div>
-                                        <span className={`text-[10px] font-bold px-2 py-1 rounded uppercase tracking-widest ${
-                                            cal.status === 'OPEN' ? 'bg-green-500/10 text-green-400' : 'bg-gray-500/10 text-gray-400'
-                                        }`}>
-                                            {cal.status === 'OPEN' ? 'Ouvert' : 'Archivé'}
-                                        </span>
-                                    </div>
-                                    <h3 className="text-2xl font-bold text-white">{months[cal.month - 1]}</h3>
-                                    <p className="text-gray-500 font-medium">{cal.year}</p>
-                                    
-                                    <div className="mt-8 flex items-center gap-2 text-sm font-bold text-white group-hover:translate-x-1 transition-all">
-                                        Ouvrir le planning <ChevronRight size={16} />
-                                    </div>
-                                </div>
-                                <div className="absolute -right-4 -bottom-4 w-24 h-24 bg-white/5 rounded-full blur-2xl group-hover:bg-white/10 transition-all"></div>
-                            </motion.div>
-                        ))}
-                    </div>
-                )}
-
-                {/* Modal Nouveau Calendrier */}
-                <AnimatePresence>
-                    {showCalendarModal && (
-                        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-6">
-                            <motion.div 
-                                initial={{ opacity: 0, scale: 0.95 }}
-                                animate={{ opacity: 1, scale: 1 }}
-                                exit={{ opacity: 0, scale: 0.95 }}
-                                className="w-full max-w-md bg-[#111111] rounded-2xl p-10 shadow-2xl border border-white/5"
-                            >
-                                <h2 className="text-2xl font-bold mb-8 text-white">Nouveau Calendrier</h2>
-                                <form onSubmit={handleCreateCalendar} className="space-y-6">
-                                    <div className="space-y-2">
-                                        <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Mois</label>
-                                        <select 
-                                            value={newCalendar.month}
-                                            onChange={(e) => setNewCalendar({...newCalendar, month: parseInt(e.target.value)})}
-                                            className="w-full px-4 py-3 rounded-lg bg-black border border-white/10 text-white focus:border-white outline-none transition-all"
-                                        >
-                                            {months.map((m, i) => (
-                                                <option key={i} value={i + 1}>{m}</option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                    <div className="space-y-2">
-                                        <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Année</label>
-                                        <input 
-                                            type="number" required
-                                            value={newCalendar.year}
-                                            onChange={(e) => setNewCalendar({...newCalendar, year: parseInt(e.target.value)})}
-                                            className="w-full px-4 py-3 rounded-lg bg-black border border-white/10 text-white focus:border-white outline-none transition-all"
-                                        />
-                                    </div>
-                                    <div className="flex gap-4 pt-4">
-                                        <button 
-                                            type="button"
-                                            onClick={() => setShowCalendarModal(false)}
-                                            className="flex-1 px-6 py-4 rounded-lg font-bold border border-white/10 text-white hover:bg-white/5 transition-all"
-                                        >
-                                            Annuler
-                                        </button>
-                                        <button 
-                                            type="submit"
-                                            className="flex-1 bg-white text-black px-6 py-4 rounded-lg font-bold hover:bg-gray-200 transition-all"
-                                        >
-                                            Créer
-                                        </button>
-                                    </div>
-                                </form>
-                            </motion.div>
-                        </div>
-                    )}
-
-                    {showSettingsModal && (
-                        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-6 overflow-y-auto">
-                            <motion.div 
-                                initial={{ opacity: 0, scale: 0.95 }}
-                                animate={{ opacity: 1, scale: 1 }}
-                                exit={{ opacity: 0, scale: 0.95 }}
-                                className="w-full max-w-4xl bg-[#111111] rounded-2xl p-10 shadow-2xl border border-white/5 my-auto"
-                            >
-                                <div className="flex justify-between items-center mb-8">
-                                    <h2 className="text-2xl font-bold text-white">Configuration du module</h2>
-                                    <button onClick={() => setShowSettingsModal(false)} className="text-gray-500 hover:text-white">Fermer</button>
-                                </div>
-
-                                <div className="grid grid-cols-1 gap-12">
-                                    {/* Gestion du Staff */}
-                                    <div className="space-y-6">
-                                        <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                                            <UserCheck size={20} className="text-purple-400" />
-                                            Types de Staff
-                                        </h3>
-                                        <form onSubmit={handleCreateStaffType} className="flex gap-2">
-                                            <input 
-                                                type="text" required placeholder="ex: Serveur, Sécurité..."
-                                                value={newStaffType.name}
-                                                onChange={(e) => setNewStaffType({...newStaffType, name: e.target.value})}
-                                                className="flex-1 px-4 py-2 rounded-lg bg-black border border-white/10 text-white focus:border-white outline-none transition-all text-sm"
-                                            />
-                                            <button type="submit" className="bg-white text-black px-4 py-2 rounded-lg font-bold text-sm hover:bg-gray-200 transition-all">
-                                                Ajouter
-                                            </button>
-                                        </form>
-                                        <div className="space-y-2 max-h-60 overflow-y-auto pr-2">
-                                            {staffTypes.map(st => (
-                                                <div key={st.id} className="flex items-center justify-between p-3 bg-black rounded-lg border border-white/5">
-                                                    <span className="text-white text-sm">{st.name}</span>
-                                                    <button onClick={() => handleDeleteStaffType(st.id)} className="text-gray-600 hover:text-red-500 transition-all">
-                                                        <Trash2 size={14} />
-                                                    </button>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                </div>
-                            </motion.div>
-                        </div>
-                    )}
-                </AnimatePresence>
-            </div>
-        );
-    }
-
-    return (
-        <div className="space-y-8">
-            <header className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-                <div>
-                    <button 
-                        onClick={() => setSelectedCalendar(null)}
-                        className="text-sm text-gray-500 hover:text-white flex items-center gap-1 mb-2 transition-all"
-                    >
-                        <ChevronRight size={14} className="rotate-180" /> Retour aux calendriers
-                    </button>
-                    <h1 className="text-3xl font-bold tracking-tight text-white">
-                        Planning {months[selectedCalendar.month - 1]} {selectedCalendar.year}
-                    </h1>
-                    <div className="flex items-center gap-2 mt-1">
-                        <span className={`w-2 h-2 rounded-full ${selectedCalendar.status === 'OPEN' ? 'bg-green-500' : 'bg-gray-500'}`}></span>
-                        <p className="text-gray-500 text-sm font-medium">
-                            Statut: {selectedCalendar.status === 'OPEN' ? 'Ouvert (Modifications autorisées)' : 'Archivé (Lecture seule)'}
-                        </p>
-                    </div>
-                </div>
-                <div className="flex flex-wrap gap-3">
-                    <select 
-                        value={spaceFilter}
-                        onChange={(e) => setSpaceFilter(e.target.value)}
-                        className="bg-[#111111] border border-white/10 text-white px-4 py-2 rounded-lg outline-none focus:border-white transition-all text-sm font-medium"
-                    >
-                        <option value="ALL">Tous les espaces</option>
-                        {spaces.map(s => (
-                            <option key={s.id} value={s.id}>{s.name}</option>
-                        ))}
-                    </select>
-                    <select 
-                        value={filter}
-                        onChange={(e) => setFilter(e.target.value)}
-                        className="bg-[#111111] border border-white/10 text-white px-4 py-2 rounded-lg outline-none focus:border-white transition-all text-sm font-medium"
-                    >
-                        <option value="ALL">Tous les types</option>
-                        <option value="PRIVÉ">Privé</option>
-                        <option value="PROFESSIONNEL">Professionnel</option>
-                    </select>
-                    {selectedCalendar.status === 'OPEN' && (
-                        <button 
-                            onClick={() => setShowEventModal(true)}
-                            className="bg-white text-black px-6 py-3 rounded-lg font-bold flex items-center gap-2 shadow-lg shadow-white/5 hover:bg-gray-200 transition-all"
-                        >
-                            <Plus size={20} />
-                            <span>Nouvelle Privatisation</span>
-                        </button>
-                    )}
-                </div>
-            </header>
-
-            {loading ? (
-                <div className="flex justify-center py-20 text-gray-500">Chargement...</div>
-            ) : filteredEvents.length === 0 ? (
-                <div className="bg-[#111111] rounded-2xl border border-white/5 p-20 flex flex-col items-center justify-center text-center">
-                    <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center mb-6">
-                        <Briefcase size={40} className="text-gray-700" />
-                    </div>
-                    <h3 className="text-xl font-bold mb-2 text-white">Aucun événement ce mois-ci</h3>
-                    <p className="text-gray-500 max-w-sm">
-                        {selectedCalendar.status === 'OPEN' 
-                            ? 'Commencez par ajouter votre première privatisation pour ce calendrier.' 
-                            : 'Ce calendrier est archivé et ne contient aucun événement.'}
-                    </p>
-                </div>
-            ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {filteredEvents.map((event) => (
-                        <motion.div 
-                            key={event.id}
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            className="bg-[#111111] rounded-2xl border border-white/5 p-6 hover:border-white/20 transition-all group"
-                        >
-                            <div className="flex justify-between items-start mb-4">
-                                <div className="flex flex-wrap gap-1">
-                                    <span className={`text-[10px] font-bold px-2 py-1 rounded uppercase tracking-widest ${
-                                        event.type === 'PRIVÉ' ? 'bg-blue-500/10 text-blue-400' : 'bg-purple-500/10 text-purple-400'
-                                    }`}>
-                                        {event.type}
-                                    </span>
-                                    {event.spaces?.map((s: any) => (
-                                        <span key={s.id} className="text-[10px] font-bold px-2 py-1 rounded uppercase tracking-widest bg-white/5 text-white flex items-center gap-1">
-                                            <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: s.color }}></div>
-                                            {s.name}
-                                        </span>
-                                    ))}
-                                </div>
-                                {selectedCalendar.status === 'OPEN' && (
-                                    <button 
-                                        onClick={() => handleDeleteEvent(event.id)}
-                                        className="text-gray-600 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
-                                    >
-                                        <Trash2 size={16} />
-                                    </button>
-                                )}
-                            </div>
-                            
-                            <h3 className="text-lg font-bold text-white mb-1">
-                                {event.type === 'PRIVÉ' ? `${event.first_name} ${event.last_name}` : event.company_name}
-                            </h3>
-                            {event.type === 'PROFESSIONNEL' && (
-                                <p className="text-xs text-gray-500 mb-3">Org: {event.organizer_name}</p>
-                            )}
-                            
-                            <div className="space-y-3 mt-4">
-                                <div className="flex items-center gap-3 text-sm text-gray-400">
-                                    <Calendar size={14} />
-                                    <span>{new Date(event.start_time).toLocaleDateString()}</span>
-                                </div>
-                                <div className="flex items-center gap-3 text-sm text-gray-400">
-                                    <FileText size={14} />
-                                    <span>{new Date(event.start_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} - {new Date(event.end_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                                </div>
-                                {event.num_people && (
-                                    <div className="flex items-center gap-3 text-sm text-gray-400">
-                                        <Users size={14} />
-                                        <span>{event.num_people} personnes</span>
-                                    </div>
-                                )}
-                                <div className="flex items-center gap-3 text-sm text-gray-400">
-                                    <Mail size={14} />
-                                    <span>{event.phone}</span>
-                                </div>
-                                {event.staff?.length > 0 && (
-                                    <div className="pt-3 border-t border-white/5 mt-3">
-                                        <p className="text-[10px] font-bold text-gray-600 uppercase tracking-widest mb-2">Staff demandé</p>
-                                        <div className="flex flex-wrap gap-2">
-                                            {event.staff.map((s: any, i: number) => (
-                                                <span key={i} className="text-[10px] text-gray-400 bg-white/5 px-2 py-1 rounded">
-                                                    {s.count}x {s.name}
-                                                </span>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        </motion.div>
-                    ))}
-                </div>
-            )}
-
-            {/* Modal de création d'événement */}
+            {/* Modal Import Événementiel */}
             <AnimatePresence>
-                {showEventModal && (
-                    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-6 overflow-y-auto">
-                        <motion.div 
-                            initial={{ opacity: 0, scale: 0.95 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0, scale: 0.95 }}
-                            className="w-full max-w-2xl bg-[#111111] rounded-2xl p-10 shadow-2xl border border-white/5 my-auto"
-                        >
-                            <div className="flex justify-between items-center mb-8">
-                                <div>
-                                    <h2 className="text-2xl font-bold text-white">Nouvelle Privatisation</h2>
-                                    <p className="text-gray-500 text-sm">Étape {creationStep} sur 2</p>
+                {showEvenementielImportModal && (
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={handleCloseEvenementielImportModal} className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
+                        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="relative bg-[#111111] border border-white/10 rounded-3xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+                        <div className="p-6 border-b border-white/5 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 bg-blue-500/10 rounded-xl">
+                                    <Calendar size={20} className="text-blue-400" />
                                 </div>
-                                <button onClick={() => { setShowEventModal(false); setCreationStep(1); }} className="text-gray-500 hover:text-white">Fermer</button>
+                                <div>
+                                    <h3 className="text-lg font-bold text-white">Import Événementiel</h3>
+                                    <p className="text-xs text-gray-500">Importer des privatisations, clients CRM et staff</p>
+                                </div>
                             </div>
+                            <button onClick={handleCloseEvenementielImportModal} className="p-2 hover:bg-white/5 rounded-xl text-gray-500 transition-all">
+                                <X size={20} />
+                            </button>
+                        </div>
 
-                            {creationStep === 1 ? (
-                                <div className="space-y-8">
-                                    <div className="space-y-4">
-                                        <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                                            <MapPin size={20} className="text-blue-400" />
-                                            1. Sélection des espaces (Obligatoire)
-                                        </h3>
-                                        <p className="text-gray-500 text-sm">Choisissez un ou plusieurs espaces pour cet événement.</p>
-                                        <div className="grid grid-cols-2 gap-4">
-                                            {spaces.map(space => (
-                                                <button
-                                                    key={space.id}
-                                                    type="button"
-                                                    onClick={() => {
-                                                        const ids = newEvent.space_ids.includes(space.id)
-                                                            ? newEvent.space_ids.filter((id: string) => id !== space.id)
-                                                            : [...newEvent.space_ids, space.id];
-                                                        setNewEvent({...newEvent, space_ids: ids});
-                                                    }}
-                                                    className={`p-4 rounded-xl border transition-all text-left flex items-center gap-3 ${
-                                                        newEvent.space_ids.includes(space.id)
-                                                            ? 'bg-white/10 border-white text-white'
-                                                            : 'bg-black border-white/5 text-gray-500 hover:border-white/20'
-                                                    }`}
-                                                >
-                                                    <div className="w-4 h-4 rounded-full" style={{ backgroundColor: space.color }}></div>
-                                                    <span className="font-bold">{space.name}</span>
-                                                </button>
-                                            ))}
-                                        </div>
-                                        {spaces.length === 0 && (
-                                            <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg text-blue-400 text-sm">
-                                                Aucun espace configuré. Contactez l'administrateur pour configurer vos espaces.
+                        <div className="flex-1 overflow-y-auto p-6">
+                            {!evenementielImportResult && (
+                                <div className="space-y-6">
+                                    {!evenementielImportPreview && (
+                                        <div>
+                                            <p className="text-xs text-gray-500 mb-3 font-bold uppercase tracking-widest">Colonnes attendues</p>
+                                            <div className="bg-white/[0.03] rounded-xl border border-white/5 p-4 text-[10px] text-gray-400 font-mono mb-4 grid grid-cols-2 gap-x-4 gap-y-1">
+                                                <span><span className="text-blue-400">Mois/Année</span> : ex: 05/2026</span>
+                                                <span><span className="text-blue-400">Client</span> : Nom de l'entreprise</span>
+                                                <span><span className="text-blue-400">Date</span> : ex: 15/05/2026</span>
+                                                <span><span className="text-blue-400">Heure Début</span> : ex: 19h</span>
+                                                <span><span className="text-blue-400">Heure Fin</span> : ex: 02h</span>
+                                                <span><span className="text-blue-400">Espace</span> : ex: Salle</span>
+                                                <span><span className="text-gray-500">Staff</span> : Nom Prénom (séparés par ;)</span>
+                                                <span><span className="text-gray-500">Nb Pers.</span> : ex: 50</span>
                                             </div>
-                                        )}
+                                            <label className="flex flex-col items-center justify-center w-full h-40 border-2 border-dashed border-white/10 rounded-2xl cursor-pointer hover:border-blue-500/40 hover:bg-blue-500/5 transition-all">
+                                                <Upload size={32} className="text-gray-500 mb-3" />
+                                                <span className="text-sm text-gray-400 font-medium">
+                                                    {evenementielImportFile ? evenementielImportFile.name : 'Sélectionner un fichier Excel (.xlsx, .csv)'}
+                                                </span>
+                                                <input
+                                                    type="file"
+                                                    accept=".xlsx,.xls,.csv"
+                                                    className="hidden"
+                                                    onChange={handleEvenementielImportFileChange}
+                                                />
+                                            </label>
+                                        </div>
+                                    )}
+
+                                    {evenementielImportLoading && (
+                                        <div className="flex flex-col items-center justify-center py-12 text-gray-400 gap-3">
+                                            <div className="w-8 h-8 border-3 border-white/10 border-t-blue-400 rounded-full animate-spin" />
+                                            <p className="text-sm">Traitement en cours...</p>
+                                        </div>
+                                    )}
+
+                                    {evenementielImportError && (
+                                        <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-start gap-3">
+                                            <AlertCircle size={20} className="text-red-400 flex-shrink-0" />
+                                            <p className="text-sm text-red-400">{evenementielImportError}</p>
+                                        </div>
+                                    )}
+
+                                    {evenementielImportPreview && !evenementielImportLoading && (
+                                        <div className="space-y-4">
+                                            <div className="grid grid-cols-3 gap-4">
+                                                <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
+                                                    <p className="text-2xl font-bold text-white">{evenementielImportPreview.total}</p>
+                                                    <p className="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Total détecté</p>
+                                                </div>
+                                                <div className="bg-green-500/5 rounded-2xl p-4 border border-green-500/10">
+                                                    <p className="text-2xl font-bold text-green-400">{evenementielImportPreview.valid}</p>
+                                                    <p className="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Prêts à l'import</p>
+                                                </div>
+                                                <div className="bg-red-500/5 rounded-2xl p-4 border border-red-500/10">
+                                                    <p className="text-2xl font-bold text-red-400">{evenementielImportPreview.errors}</p>
+                                                    <p className="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Incomplets</p>
+                                                </div>
+                                            </div>
+
+                                            <div className="border border-white/10 rounded-2xl overflow-hidden overflow-x-auto">
+                                                <table className="w-full text-[11px] text-left">
+                                                    <thead className="bg-white/5 text-gray-400 uppercase tracking-widest text-[9px]">
+                                                        <tr>
+                                                            <th className="px-4 py-3">Date</th>
+                                                            <th className="px-4 py-3">Client</th>
+                                                            <th className="px-4 py-3">Horaires</th>
+                                                            <th className="px-4 py-3">Espace</th>
+                                                            <th className="px-4 py-3">Staff</th>
+                                                            <th className="px-4 py-3">Statut</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-white/5">
+                                                        {evenementielImportPreview.rows.map((r: any, i: number) => (
+                                                            <tr key={i} className="text-gray-300">
+                                                                <td className="px-4 py-3">{r.date}</td>
+                                                                <td className="px-4 py-3 font-bold">{r.client}</td>
+                                                                <td className="px-4 py-3">{r.start} - {r.end}</td>
+                                                                <td className="px-4 py-3">{r.espace || '-'}</td>
+                                                                <td className="px-4 py-3">
+                                                                    <div className="flex flex-wrap gap-1">
+                                                                        {Array.isArray(r.staffs) && r.staffs.map((s: any, si: number) => (
+                                                                            <span key={si} className={`px-1.5 py-0.5 rounded ${s?.id ? 'bg-green-500/10 text-green-400' : 'bg-gray-500/10 text-gray-400'}`}>
+                                                                                {s?.name || 'Inconnu'}
+                                                                            </span>
+                                                                        ))}
+                                                                    </div>
+                                                                </td>
+                                                                <td className="px-4 py-3">
+                                                                    {r.isValid ? (
+                                                                        <span className="text-green-400 font-bold">OK</span>
+                                                                    ) : (
+                                                                        <span className="text-red-400 font-bold">Erreur</span>
+                                                                    )}
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {evenementielImportResult && (
+                                <div className="py-12 flex flex-col items-center text-center space-y-6">
+                                    <div className="w-20 h-20 bg-green-500/10 rounded-full flex items-center justify-center">
+                                        <CheckCircle2 size={40} className="text-green-400" />
                                     </div>
-                                    <button
-                                        disabled={newEvent.space_ids.length === 0}
-                                        onClick={() => setCreationStep(2)}
-                                        className="w-full bg-white text-black py-4 rounded-lg font-bold hover:bg-gray-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                                    >
-                                        Continuer vers les détails
+                                    <div>
+                                        <h4 className="text-2xl font-bold text-white">Importation Terminée !</h4>
+                                        <p className="text-gray-500 mt-2">
+                                            {evenementielImportResult.createdCount} événement(s) créé(s) avec succès.<br />
+                                            {evenementielImportResult.crmCreated} contact(s) CRM ajouté(s).
+                                        </p>
+                                    </div>
+                                    <button onClick={handleCloseEvenementielImportModal} className="px-8 py-3 bg-white text-black font-bold rounded-xl hover:bg-gray-200 transition-all">
+                                        Fermer
                                     </button>
                                 </div>
-                            ) : (
-                                <form onSubmit={handleCreateEvent} className="space-y-8">
-                                    <div className="space-y-6">
-                                        <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                                            <FileText size={20} className="text-purple-400" />
-                                            2. Détails de l'événement
-                                        </h3>
-                                        
-                                        <div className="flex gap-4 p-1 bg-black rounded-xl border border-white/5">
-                                            <button 
-                                                type="button"
-                                                onClick={() => setNewEvent({...newEvent, type: 'PRIVÉ'})}
-                                                className={`flex-1 py-3 rounded-lg font-bold text-sm transition-all ${newEvent.type === 'PRIVÉ' ? 'bg-white text-black' : 'text-gray-500 hover:text-white'}`}
-                                            >
-                                                Événement PRIVÉ
-                                            </button>
-                                            <button 
-                                                type="button"
-                                                onClick={() => setNewEvent({...newEvent, type: 'PROFESSIONNEL'})}
-                                                className={`flex-1 py-3 rounded-lg font-bold text-sm transition-all ${newEvent.type === 'PROFESSIONNEL' ? 'bg-white text-black' : 'text-gray-500 hover:text-white'}`}
-                                            >
-                                                Événement PROFESSIONNEL
-                                            </button>
-                                        </div>
-
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                            {newEvent.type === 'PRIVÉ' ? (
-                                                <>
-                                                    <div className="space-y-2">
-                                                        <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Prénom *</label>
-                                                        <input 
-                                                            type="text" required
-                                                            value={newEvent.first_name}
-                                                            onChange={(e) => setNewEvent({...newEvent, first_name: e.target.value})}
-                                                            className="w-full px-4 py-3 rounded-lg bg-black border border-white/10 text-white focus:border-white outline-none transition-all"
-                                                        />
-                                                    </div>
-                                                    <div className="space-y-2">
-                                                        <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Nom *</label>
-                                                        <input 
-                                                            type="text" required
-                                                            value={newEvent.last_name}
-                                                            onChange={(e) => setNewEvent({...newEvent, last_name: e.target.value})}
-                                                            className="w-full px-4 py-3 rounded-lg bg-black border border-white/10 text-white focus:border-white outline-none transition-all"
-                                                        />
-                                                    </div>
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <div className="space-y-2">
-                                                        <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Nom Entreprise *</label>
-                                                        <input 
-                                                            type="text" required
-                                                            value={newEvent.company_name}
-                                                            onChange={(e) => setNewEvent({...newEvent, company_name: e.target.value})}
-                                                            className="w-full px-4 py-3 rounded-lg bg-black border border-white/10 text-white focus:border-white outline-none transition-all"
-                                                        />
-                                                    </div>
-                                                    <div className="space-y-2">
-                                                        <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Nom Organisateur *</label>
-                                                        <input 
-                                                            type="text" required
-                                                            value={newEvent.organizer_name}
-                                                            onChange={(e) => setNewEvent({...newEvent, organizer_name: e.target.value})}
-                                                            className="w-full px-4 py-3 rounded-lg bg-black border border-white/10 text-white focus:border-white outline-none transition-all"
-                                                        />
-                                                    </div>
-                                                </>
-                                            )}
-
-                                            <div className="space-y-2">
-                                                <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Téléphone *</label>
-                                                <input 
-                                                    type="tel" required
-                                                    value={newEvent.phone}
-                                                    onChange={(e) => setNewEvent({...newEvent, phone: e.target.value})}
-                                                    className="w-full px-4 py-3 rounded-lg bg-black border border-white/10 text-white focus:border-white outline-none transition-all"
-                                                />
-                                            </div>
-                                            <div className="space-y-2">
-                                                <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Nombre de personnes {newEvent.type === 'PRIVÉ' ? '*' : ''}</label>
-                                                <input 
-                                                    type="number" required={newEvent.type === 'PRIVÉ'}
-                                                    value={newEvent.num_people}
-                                                    onChange={(e) => setNewEvent({...newEvent, num_people: e.target.value})}
-                                                    className="w-full px-4 py-3 rounded-lg bg-black border border-white/10 text-white focus:border-white outline-none transition-all"
-                                                />
-                                            </div>
-
-                                            <div className="space-y-2">
-                                                <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Heure Début *</label>
-                                                <input 
-                                                    type="datetime-local" required
-                                                    value={newEvent.start_time}
-                                                    onChange={(e) => setNewEvent({...newEvent, start_time: e.target.value})}
-                                                    className="w-full px-4 py-3 rounded-lg bg-black border border-white/10 text-white focus:border-white outline-none transition-all"
-                                                />
-                                            </div>
-                                            <div className="space-y-2">
-                                                <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Heure Fin *</label>
-                                                <input 
-                                                    type="datetime-local" required
-                                                    value={newEvent.end_time}
-                                                    onChange={(e) => setNewEvent({...newEvent, end_time: e.target.value})}
-                                                    className="w-full px-4 py-3 rounded-lg bg-black border border-white/10 text-white focus:border-white outline-none transition-all"
-                                                />
-                                            </div>
-                                        </div>
-
-                                        {/* Staff Requests */}
-                                        <div className="space-y-4 pt-4 border-t border-white/5">
-                                            <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                                                <UserCheck size={16} className="text-gray-400" />
-                                                Demandes de Staff
-                                            </h4>
-                                            <div className="grid grid-cols-2 gap-4">
-                                                {staffTypes.map(st => (
-                                                    <div key={st.id} className="flex items-center justify-between p-3 bg-black rounded-lg border border-white/5">
-                                                        <span className="text-xs text-gray-400">{st.name}</span>
-                                                        <input 
-                                                            type="number" min="0"
-                                                            value={newEvent.staff_requests[st.id] || 0}
-                                                            onChange={(e) => setNewEvent({
-                                                                ...newEvent, 
-                                                                staff_requests: {
-                                                                    ...newEvent.staff_requests,
-                                                                    [st.id]: parseInt(e.target.value) || 0
-                                                                }
-                                                            })}
-                                                            className="w-16 px-2 py-1 rounded bg-[#111111] border border-white/10 text-white text-xs outline-none focus:border-white"
-                                                        />
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div className="flex gap-4 pt-4">
-                                        <button 
-                                            type="button"
-                                            onClick={() => setCreationStep(1)}
-                                            className="flex-1 px-6 py-4 rounded-lg font-bold border border-white/10 text-white hover:bg-white/5 transition-all"
-                                        >
-                                            Retour
-                                        </button>
-                                        <button 
-                                            type="submit"
-                                            className="flex-1 bg-white text-black px-6 py-4 rounded-lg font-bold hover:bg-gray-200 transition-all"
-                                        >
-                                            Enregistrer
-                                        </button>
-                                    </div>
-                                </form>
                             )}
-                        </motion.div>
-                    </div>
-                )}
-            </AnimatePresence>
-        </div>
-    );
-};
-
-const ModulePlaceholder = ({ title, icon: Icon }: any) => (
-    <div className="space-y-8">
-        <header className="flex items-center justify-between">
-            <div>
-                <h1 className="text-3xl font-bold tracking-tight text-white">{title}</h1>
-                <p className="text-gray-500 mt-1">Gérez vos données de {title.toLowerCase()}.</p>
-            </div>
-            <div className="flex gap-3">
-                <button className="bg-[#111111] border border-white/5 p-3 rounded-lg hover:bg-white/5 transition-all text-white">
-                    <Filter size={20} className="text-gray-500" />
-                </button>
-                <button className="bg-[#111111] border border-white/5 p-3 rounded-lg hover:bg-white/5 transition-all text-white">
-                    <Download size={20} className="text-gray-500" />
-                </button>
-                <button className="bg-white text-black px-6 py-3 rounded-lg font-bold flex items-center gap-2 shadow-lg shadow-white/5 hover:bg-gray-200 transition-all">
-                    <Plus size={20} />
-                    <span>Nouveau</span>
-                </button>
-            </div>
-        </header>
-
-        <div className="bg-[#111111] rounded-2xl border border-white/5 shadow-sm p-12 flex flex-col items-center justify-center text-center">
-            <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center mb-6 border border-white/10">
-                <Icon size={40} className="text-gray-600" />
-            </div>
-            <h3 className="text-xl font-bold mb-2 text-white">Aucune donnée trouvée</h3>
-            <p className="text-gray-500 max-w-sm">Commencez par ajouter votre premier élément de {title.toLowerCase()} pour voir les statistiques et graphiques.</p>
-        </div>
-    </div>
-);
-
-const ChangePasswordView = () => {
-    const [newPassword, setNewPassword] = React.useState('');
-    const [confirmPassword, setConfirmPassword] = React.useState('');
-    const [error, setError] = React.useState('');
-    const [loading, setLoading] = React.useState(false);
-    const { login } = useAuth();
-    const navigate = useNavigate();
-
-    const strength = (() => {
-        if (newPassword.length === 0) return 0;
-        let s = 0;
-        if (newPassword.length >= 8) s++;
-        if (/[A-Z]/.test(newPassword)) s++;
-        if (/[0-9]/.test(newPassword)) s++;
-        if (/[^A-Za-z0-9]/.test(newPassword)) s++;
-        return s;
-    })();
-    const strengthLabel = ['', 'Faible', 'Moyen', 'Bon', 'Fort'][strength];
-    const strengthColor = ['', '#ef4444', '#f97316', '#eab308', '#22c55e'][strength];
-
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setError('');
-        if (newPassword.length < 8) {
-            setError('Le mot de passe doit contenir au moins 8 caractères.');
-            return;
-        }
-        if (newPassword !== confirmPassword) {
-            setError('Les mots de passe ne correspondent pas.');
-            return;
-        }
-        setLoading(true);
-        try {
-            const data = await authApi.forceChangePassword(newPassword);
-            login(data.token, data.user);
-            navigate('/');
-        } catch (err: any) {
-            setError(err.message);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    return (
-        <div className="min-h-screen bg-[#0A0A0A] flex items-center justify-center p-6">
-            <motion.div
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, ease: 'easeOut' }}
-                className="w-full max-w-md"
-            >
-                {/* Logo */}
-                <div className="flex flex-col items-center mb-10">
-                    <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mb-5 shadow-lg shadow-white/10">
-                        <span className="text-black font-black text-2xl tracking-tighter">A</span>
-                    </div>
-                    <h1 className="text-3xl font-black tracking-tight text-white">L'IAmani</h1>
-                    <p className="text-gray-500 text-xs mt-1 uppercase tracking-widest font-bold">Platform</p>
-                </div>
-
-                {/* Card */}
-                <div className="bg-[#111111] rounded-2xl border border-white/5 shadow-2xl overflow-hidden">
-                    {/* Banner */}
-                    <div className="bg-white/[0.04] border-b border-white/5 px-8 py-5 flex items-start gap-3">
-                        <div className="mt-0.5 w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center flex-shrink-0">
-                            <Lock size={15} className="text-amber-400" />
                         </div>
-                        <div>
-                            <p className="text-sm font-bold text-white leading-snug">Sécurité du compte</p>
-                            <p className="text-xs text-gray-400 mt-1 leading-relaxed">
-                                Pour des raisons de sécurité, veuillez définir votre mot de passe personnel avant de continuer.
-                            </p>
-                        </div>
-                    </div>
 
-                    {/* Form */}
-                    <form onSubmit={handleSubmit} className="p-8 space-y-5">
-                        {error && (
-                            <div className="p-3 bg-red-500/10 text-red-400 text-xs rounded-lg flex items-center gap-2 border border-red-500/20">
-                                <XCircle size={14} />
-                                {error}
+                        {!evenementielImportResult && (
+                            <div className="p-6 border-t border-white/5 bg-white/[0.02] flex gap-3">
+                                <button onClick={handleCloseEvenementielImportModal} className="flex-1 py-3 px-4 border border-white/10 rounded-xl font-bold text-white hover:bg-white/5 transition-all">
+                                    Annuler
+                                </button>
+                                {evenementielImportPreview && !evenementielImportLoading && (
+                                    <button
+                                        onClick={executeEvenementielImport}
+                                        disabled={evenementielImportPreview.valid === 0}
+                                        className="flex-[2] py-3 px-4 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-500 transition-all disabled:opacity-50"
+                                    >
+                                        Lancer l'importation ({evenementielImportPreview.valid} lignes)
+                                    </button>
+                                )}
                             </div>
                         )}
-
-                        <div className="space-y-1.5">
-                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Nouveau mot de passe</label>
-                            <input
-                                type="password"
-                                value={newPassword}
-                                onChange={(e) => setNewPassword(e.target.value)}
-                                className="w-full px-4 py-3 rounded-lg bg-black border border-white/10 text-white focus:border-white/40 focus:ring-0 transition-all outline-none text-sm"
-                                placeholder="Min. 8 caractères"
-                                required
-                                autoComplete="new-password"
-                            />
-                            {newPassword.length > 0 && (
-                                <div className="flex items-center gap-2 mt-1.5">
-                                    <div className="flex gap-1 flex-1">
-                                        {[1,2,3,4].map((i) => (
-                                            <div
-                                                key={i}
-                                                className="h-1 flex-1 rounded-full transition-all"
-                                                style={{ background: i <= strength ? strengthColor : 'rgba(255,255,255,0.08)' }}
-                                            />
-                                        ))}
-                                    </div>
-                                    <span className="text-[10px] font-bold" style={{ color: strengthColor }}>{strengthLabel}</span>
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="space-y-1.5">
-                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Confirmer le mot de passe</label>
-                            <input
-                                type="password"
-                                value={confirmPassword}
-                                onChange={(e) => setConfirmPassword(e.target.value)}
-                                className="w-full px-4 py-3 rounded-lg bg-black border border-white/10 text-white focus:border-white/40 focus:ring-0 transition-all outline-none text-sm"
-                                placeholder="Répétez le mot de passe"
-                                required
-                                autoComplete="new-password"
-                            />
-                            {confirmPassword.length > 0 && newPassword !== confirmPassword && (
-                                <p className="text-[10px] text-red-400 mt-1">Les mots de passe ne correspondent pas</p>
-                            )}
-                            {confirmPassword.length > 0 && newPassword === confirmPassword && (
-                                <p className="text-[10px] text-green-400 mt-1 flex items-center gap-1"><CheckCircle size={10} /> Mots de passe identiques</p>
-                            )}
-                        </div>
-
-                        <button
-                            type="submit"
-                            disabled={loading}
-                            className="w-full bg-white text-black py-3.5 rounded-lg font-bold hover:bg-gray-100 transition-all shadow-lg shadow-white/5 text-sm disabled:opacity-50 disabled:cursor-not-allowed mt-2"
-                        >
-                            {loading ? 'Validation...' : 'Définir mon mot de passe'}
-                        </button>
-                    </form>
+                    </motion.div>
                 </div>
+            )}
+        </AnimatePresence>
 
-                <p className="text-center text-[10px] text-gray-600 mt-6">
-                    Cette étape est obligatoire et ne peut pas être ignorée.
-                </p>
-            </motion.div>
-        </div>
-    );
-};
-
-// --- App Component ---
-
-const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
-    const { token, user, loading } = useAuth();
-    if (loading) return <div>Chargement...</div>;
-    
-    if (!token) return <Navigate to="/login" />;
-    
-    // Force password change if temporary
-    const payload = JSON.parse(atob(token.split('.')[1]));
-    if ((payload.isTemporary || payload.mustChangePassword) && window.location.pathname !== '/change-password') {
-        return <Navigate to="/change-password" />;
-    }
-
-    if (user?.type === 'collaborator') {
-        const path = window.location.pathname;
-        const routeModuleMap: Record<string, string> = {
-            '/planning': 'planning',
-            '/evenementiel': 'evenementiel',
-            '/crm': 'crm',
-            '/factures': 'facture',
-            '/employes': 'employes'
-        };
-        const requiredModule = routeModuleMap[path];
-        if (requiredModule) {
-            const allowed = Array.isArray(user.modules_access) ? user.modules_access : [];
-            if (!allowed.includes(requiredModule)) {
-                return <Navigate to="/" />;
-            }
-        }
-    }
-    
-    return <Layout>{children}</Layout>;
-};
-
-class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean, error: any }> {
-    constructor(props: any) {
-        super(props);
-        this.state = { hasError: false, error: null };
-    }
-
-    static getDerivedStateFromError(error: any) {
-        return { hasError: true, error };
-    }
-
-    componentDidCatch(error: any, errorInfo: any) {
-        console.error("Uncaught error:", error, errorInfo);
-    }
-
-    render() {
-        if (this.state.hasError) {
-            return (
-                <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-10 text-center">
-                    <XCircle size={48} className="text-red-500 mb-4" />
-                    <h1 className="text-2xl font-bold mb-2">Une erreur est survenue</h1>
-                    <p className="text-gray-400 mb-6 max-w-md">
-                        L'application n'a pas pu se charger correctement. 
-                        Veuillez rafraîchir la page ou contacter le support si le problème persiste.
-                    </p>
-                    <pre className="bg-white/5 p-4 rounded-lg text-xs text-left overflow-auto max-w-full mb-6">
-                        {this.state.error?.message || String(this.state.error)}
-                    </pre>
-                    <button 
-                        onClick={() => window.location.reload()}
-                        className="bg-white text-black px-6 py-3 rounded-lg font-bold"
-                    >
-                        Rafraîchir la page
-                    </button>
-                </div>
-            );
-        }
-
-        return this.props.children;
-    }
+    </div>
+);
 }
 
-export default function App() {
-    return (
-        <ErrorBoundary>
-            <AuthProvider>
-                <Router>
-                    <Routes>
-                        <Route path="/login" element={<LoginView />} />
-                        <Route path="/change-password" element={<ChangePasswordView />} />
-                        <Route path="/" element={<PrivateRoute><DashboardView /></PrivateRoute>} />
-                        <Route path="/admin/clients" element={<PrivateRoute><AdminClientsView /></PrivateRoute>} />
-                        <Route path="/admin/clients/:id" element={<PrivateRoute><AdminClientDetailView /></PrivateRoute>} />
-                        <Route path="/admin/support" element={<PrivateRoute><SupportAdminView /></PrivateRoute>} />
-                        
-                        {/* Modules */}
-                        <Route path="/planning" element={<PrivateRoute><ModulePlaceholder title="Planning" icon={Calendar} /></PrivateRoute>} />
-                        <Route path="/evenementiel" element={<PrivateRoute><EvenementielModule /></PrivateRoute>} />
-                        <Route path="/crm" element={<PrivateRoute><CRMModule /></PrivateRoute>} />
-                        <Route path="/factures" element={<PrivateRoute><FacturesModule /></PrivateRoute>} />
-                        <Route path="/employes" element={<PrivateRoute><PostesEmployesModule /></PrivateRoute>} />
-                        
-                        {/* Fallback */}
-                        <Route path="*" element={<Navigate to="/" />} />
-                    </Routes>
-                </Router>
-            </AuthProvider>
-        </ErrorBoundary>
-    );
-}
+const App = () => (
+    <Router>
+        <AuthProvider>
+            <Routes>
+                <Route path="/login" element={<LoginView />} />
+                <Route path="/*" element={
+                    <Layout>
+                        <Routes>
+                            <Route path="/" element={<DashboardView />} />
+                            <Route path="/planning" element={<PlanningModule />} />
+                            <Route path="/crm" element={<CRMModule />} />
+                            <Route path="/factures" element={<FacturesModule />} />
+                            <Route path="/employes" element={<PostesEmployesModule />} />
+                            <Route path="/admin/clients" element={<AdminClientsView />} />
+                            <Route path="/admin/clients/:id" element={<AdminClientDetailView />} />
+                            <Route path="/admin/support" element={<SupportAdminView />} />
+                            <Route path="/evenementiel" element={<EvenementielModule />} />
+                            <Route path="*" element={<Navigate to="/" replace />} />
+                        </Routes>
+                    </Layout>
+                } />
+            </Routes>
+        </AuthProvider>
+    </Router>
+);
+
+export default App;

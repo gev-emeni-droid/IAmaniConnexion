@@ -1,0 +1,7 @@
+name = "facture"
+pages_build_output_dir = "dist"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "facture-db"
+database_id = "29423ee1-e523-46df-bd81-791b6195fcda"

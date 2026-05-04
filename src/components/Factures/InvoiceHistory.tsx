@@ -131,7 +131,6 @@ export const InvoiceHistory = ({ refreshKey = 0, onBack, onOpenInvoice, onDownlo
                                 <th className="px-4 py-3 text-[10px] uppercase tracking-widest font-bold text-[var(--text-muted)]">N° Facture</th>
                                 <th className="px-4 py-3 text-[10px] uppercase tracking-widest font-bold text-[var(--text-muted)]">Date</th>
                                 <th className="px-4 py-3 text-[10px] uppercase tracking-widest font-bold text-[var(--text-muted)]">Client</th>
-                                <th className="px-4 py-3 text-[10px] uppercase tracking-widest font-bold text-[var(--text-muted)]">Adresse mail</th>
                                 <th className="px-4 py-3 text-[10px] uppercase tracking-widest font-bold text-[var(--text-muted)] text-right">Montant TTC</th>
                                 <th className="px-4 py-3 text-[10px] uppercase tracking-widest font-bold text-[var(--text-muted)] text-right">Reste à payer</th>
                                 <th className="px-4 py-3 text-[10px] uppercase tracking-widest font-bold text-[var(--text-muted)] text-right">Actions</th>
@@ -140,24 +139,17 @@ export const InvoiceHistory = ({ refreshKey = 0, onBack, onOpenInvoice, onDownlo
                         <tbody>
                             {loading ? (
                                 <tr>
-                                    <td colSpan={6} className="px-4 py-8 text-center text-sm text-[var(--text-muted)]">Chargement...</td>
+                                    <td colSpan={5} className="px-4 py-8 text-center text-sm text-[var(--text-muted)]">Chargement...</td>
                                 </tr>
                             ) : items.length === 0 ? (
                                 <tr>
-                                    <td colSpan={6} className="px-4 py-8 text-center text-sm text-[var(--text-muted)]">Aucune facture enregistrée.</td>
+                                    <td colSpan={5} className="px-4 py-8 text-center text-sm text-[var(--text-muted)]">Aucune facture enregistrée.</td>
                                 </tr>
                             ) : items.map((item) => (
                                 <tr key={item.id} className="border-b border-[var(--border-color)] last:border-0">
                                     <td className="px-4 py-3 text-sm font-bold text-[var(--text-primary)]">{item.invoice_number || '-'}</td>
                                     <td className="px-4 py-3 text-sm text-[var(--text-primary)]">{item.due_date ? new Date(item.due_date).toLocaleDateString() : new Date(item.created_at).toLocaleDateString()}</td>
                                     <td className="px-4 py-3 text-sm text-[var(--text-primary)]">{item.customer_name || '-'}</td>
-                                    <td className="px-4 py-3 text-sm text-[var(--text-primary)]">
-                                        {item.last_sent_email
-                                            ? item.last_sent_email
-                                            : (item.facture_history && Array.isArray(item.facture_history) && item.facture_history.length > 0
-                                                ? item.facture_history.filter((h:any) => h.action === 'email').sort((a:any,b:any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]?.email || '-'
-                                                : '-')}
-                                    </td>
                                     <td className="px-4 py-3 text-sm text-right font-bold text-[var(--text-primary)]">{toCurrency(Number(item.total_ttc ?? item.amount ?? 0))}</td>
                                     <td className="px-4 py-3 text-sm text-right font-bold text-[var(--text-primary)]">{toCurrency(Number(item.remaining_due ?? 0))}</td>
                                     <td className="px-4 py-3">

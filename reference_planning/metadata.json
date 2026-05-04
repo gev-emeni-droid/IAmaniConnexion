@@ -1,0 +1,5 @@
+{
+  "name": "Polpo Planning",
+  "description": "A comprehensive weekly scheduling application for restaurant staff with automatic archiving, KPI tracking, and PDF export capabilities.",
+  "requestFramePermissions": []
+}

@@ -392,7 +392,7 @@ export const CRMModule = () => {
                         </div>
 
                         <div className="space-y-4">
-                            {selectedContact.history?.map((event: any) => (
+                            {selectedContact.events?.map((event: any) => (
                                 <div key={event.id} className="bg-white dark:bg-[#111111] rounded-2xl border border-gray-200 dark:border-white/10 p-6 flex items-center justify-between group hover:border-gray-300 dark:hover:border-white/20 transition-all">
                                     <div className="flex items-center gap-6">
                                         <div className="w-12 h-12 bg-slate-100 dark:bg-white/5 rounded-xl flex flex-col items-center justify-center text-slate-900 dark:text-white border border-gray-200 dark:border-white/10">
@@ -404,7 +404,7 @@ export const CRMModule = () => {
                                             <div className="flex items-center gap-4 mt-1">
                                                 <span className="text-xs text-slate-500 dark:text-gray-500 flex items-center gap-1">
                                                     <Calendar size={12} />
-                                                    {event.spaces || 'N/A'}
+                                                    {Array.isArray(event.spaces) ? event.spaces.map((s: any) => s.name || s.id).join(', ') : (event.spaces || 'N/A')}
                                                 </span>
                                                 <span className="text-xs text-slate-500 dark:text-gray-500 flex items-center gap-1">
                                                     <Users size={12} />
@@ -419,7 +419,7 @@ export const CRMModule = () => {
                                     </div>
                                 </div>
                             ))}
-                            {(!selectedContact.history || selectedContact.history.length === 0) && (
+                            {(!selectedContact.events || selectedContact.events.length === 0) && (
                                 <p className="text-center text-slate-500 dark:text-gray-600 py-10 bg-white dark:bg-[#111111] rounded-2xl border border-dashed border-gray-200 dark:border-white/10">Aucun historique trouvé</p>
                             )}
                         </div>

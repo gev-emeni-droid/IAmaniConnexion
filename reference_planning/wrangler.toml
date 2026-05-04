@@ -1,0 +1,13 @@
+name = "polpo-direction"
+compatibility_date = "2024-06-20"
+pages_build_output_dir = "dist"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "polpo-direction"
+database_id = "d66f3708-cf87-4505-b4c2-b0d028604d9e"
+
+[[d1_databases]]
+binding = "FACTURE_DB"
+database_name = "facture-db"
+database_id = "29423ee1-e523-46df-bd81-791b6195fcda"
