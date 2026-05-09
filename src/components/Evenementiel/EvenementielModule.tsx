@@ -29,9 +29,13 @@ import {
     Phone,
     Mail,
     Trash2,
-    MoreHorizontal
+    MoreHorizontal,
+    FileText,
+    Paperclip,
+    ExternalLink
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { InfoModal } from '../InfoModal';
 import { EventForm } from './EventForm';
 import { MonthlyCalendar } from './MonthlyCalendar';
 
@@ -84,6 +88,7 @@ export const EvenementielModule = () => {
     const [confirmAction, setConfirmAction] = useState<{ type: 'deleteCalendar' | 'archiveCalendar' | 'deleteEvent'; id: string; label: string } | null>(null);
     const [calendarSection, setCalendarSection] = useState<'active' | 'archives'>('active');
     const [openArchiveYears, setOpenArchiveYears] = useState<Record<number, boolean>>({});
+    const [showInfoModal, setShowInfoModal] = useState(true);
 
     const normalizeIdList = (value: any): string[] => {
         if (!Array.isArray(value)) return [];
@@ -303,6 +308,8 @@ export const EvenementielModule = () => {
                 staff_category_id: category.id,
                 employee_ids: mappingByCategory[category.id] || []
             }));
+
+            // Save both staff mappings and config
             await Promise.all([
                 moduleApi.saveStaffCategoryMappings(payload),
                 moduleApi.saveEvenementielConfig({
@@ -311,10 +318,12 @@ export const EvenementielModule = () => {
                     notify_recipient_employee_ids: notifyRecipientIds
                 })
             ]);
+
             setShowSettingsModal(false);
             setToastMessage('Paramètres enregistrés avec succès.');
             setTimeout(() => setToastMessage(''), 2800);
         } catch (e: any) {
+            console.error('Save Mapping Error:', e);
             setSettingsError(e?.message || 'Impossible d\'enregistrer le mapping staff.');
         } finally {
             setSavingMappings(false);
@@ -420,6 +429,13 @@ export const EvenementielModule = () => {
 
     return (
         <div className="space-y-10">
+            <InfoModal 
+                id="evenementiel_news_v2"
+                title="Nouveautés Événementiel"
+                message="Nouveautés : vous pouvez désormais ajouter des fichiers à vos privatisations et préciser s'il s'agit d'un événement privé ou professionnel. Les notifications s'envoient maintenant automatiquement : plus besoin d'ouvrir votre boîte mail, cliquez simplement sur « Notifier » et sélectionnez le destinataire."
+                isOpen={showInfoModal}
+                onClose={() => setShowInfoModal(false)}
+            />
             <header className="no-print flex items-center justify-between">
                 <div>
                     <h1 className="text-3xl font-bold text-[var(--text-primary)] tracking-tight">Module Événementiel</h1>
@@ -1042,6 +1058,47 @@ export const EvenementielModule = () => {
                                         })}
                                     </div>
                                 </div>
+
+                                {/* 6. NOTES & DOCUMENTS */}
+                                {(selectedEvent.note_text || (selectedEvent.documents && selectedEvent.documents.length > 0)) && (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-4 border-t border-[var(--border-color)]">
+                                        {selectedEvent.note_text && (
+                                            <div className="space-y-4">
+                                                <h3 className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest flex items-center gap-2">
+                                                    <AlertCircle size={14} className="text-red-400" /> Note / Message
+                                                </h3>
+                                                <div className="p-4 bg-red-500/5 rounded-2xl border border-red-500/10 text-sm text-[var(--text-secondary)] whitespace-pre-wrap leading-relaxed">
+                                                    {selectedEvent.note_text}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {selectedEvent.documents && selectedEvent.documents.length > 0 && (
+                                            <div className="space-y-4">
+                                                <h3 className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest flex items-center gap-2">
+                                                    <Paperclip size={14} className="text-blue-400" /> Documents
+                                                </h3>
+                                                <div className="space-y-2">
+                                                    {selectedEvent.documents.map((doc: any, i: number) => (
+                                                        <button
+                                                            key={i}
+                                                            onClick={() => {
+                                                                if (doc.storage_key) window.open(doc.storage_key, '_blank');
+                                                            }}
+                                                            className="w-full flex items-center justify-between p-3 bg-blue-500/5 hover:bg-blue-500/10 rounded-xl border border-blue-500/10 transition-all group"
+                                                        >
+                                                            <div className="flex items-center gap-3 overflow-hidden">
+                                                                <FileText size={16} className="text-blue-400 shrink-0" />
+                                                                <span className="text-xs font-bold text-[var(--text-primary)] truncate">{doc.file_name}</span>
+                                                            </div>
+                                                            <ExternalLink size={14} className="text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                             </div>
 
                             <div className="p-8 bg-[var(--interactive-hover)] border-t border-[var(--border-color)] flex justify-between gap-4">

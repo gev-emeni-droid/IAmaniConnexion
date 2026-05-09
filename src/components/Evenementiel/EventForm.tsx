@@ -174,9 +174,9 @@ export const EventForm = ({ calendarId, month, year, onClose, onSuccess, initial
                     .filter((emp: any) => allowedTakerIds.includes(String(emp.id)))
                     .map((emp: any) => ({
                         id: String(emp.id),
-                        first_name: emp.first_name,
-                        last_name: emp.last_name,
-                        email: emp.email
+                        first_name: emp.first_name || '',
+                        last_name: emp.last_name || '',
+                        email: emp.email || ''
                     }));
 
             setSpaces(configuredSpaces);
@@ -207,6 +207,7 @@ export const EventForm = ({ calendarId, month, year, onClose, onSuccess, initial
 
                 // Helper to get local YYYY-MM-DD
                 const getLocalDateStr = (d: Date) => {
+                    if (isNaN(d.getTime())) return getDefaultDate();
                     const year = d.getFullYear();
                     const month = String(d.getMonth() + 1).padStart(2, '0');
                     const day = String(d.getDate()).padStart(2, '0');
@@ -215,6 +216,7 @@ export const EventForm = ({ calendarId, month, year, onClose, onSuccess, initial
 
                 // Helper to get local HH:mm
                 const getLocalTimeStr = (d: Date) => {
+                    if (isNaN(d.getTime())) return '19:00';
                     const hours = String(d.getHours()).padStart(2, '0');
                     const minutes = String(d.getMinutes()).padStart(2, '0');
                     return `${hours}:${minutes}`;
@@ -560,7 +562,7 @@ export const EventForm = ({ calendarId, month, year, onClose, onSuccess, initial
                                                     value={formData.firstName}
                                                     onChange={e => {
                                                         const value = e.target.value;
-                                                        setFormData({...formData, firstName: value});
+                                                        setFormData({...formData, firstName: value, crmContactId: ''});
                                                         triggerLookup('firstName', value);
                                                     }}
                                                     onBlur={() => setTimeout(() => setLookupField(null), 120)}
@@ -575,7 +577,7 @@ export const EventForm = ({ calendarId, month, year, onClose, onSuccess, initial
                                                     value={formData.lastName}
                                                     onChange={e => {
                                                         const value = e.target.value;
-                                                        setFormData({...formData, lastName: value});
+                                                        setFormData({...formData, lastName: value, crmContactId: ''});
                                                         triggerLookup('lastName', value);
                                                     }}
                                                     onBlur={() => setTimeout(() => setLookupField(null), 120)}
@@ -593,7 +595,7 @@ export const EventForm = ({ calendarId, month, year, onClose, onSuccess, initial
                                                     value={formData.companyName}
                                                     onChange={e => {
                                                         const value = e.target.value;
-                                                        setFormData({...formData, companyName: value});
+                                                        setFormData({...formData, companyName: value, crmContactId: ''});
                                                         triggerLookup('companyName', value);
                                                     }}
                                                     onBlur={() => setTimeout(() => setLookupField(null), 120)}

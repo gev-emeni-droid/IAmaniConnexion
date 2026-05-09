@@ -1,6 +1,5 @@
 import React from 'react';
 import { toPng } from 'html-to-image';
-import { jsPDF } from 'jspdf';
 import { Download, History, Mail, Plus, Printer, RotateCcw, Send, Settings, Trash2 } from 'lucide-react';
 import { moduleApi } from '../../lib/api';
 import { resolveLogoUrl } from '../../lib/resolveLogoUrl';
@@ -175,16 +174,29 @@ const toDisplayDate = (inputDate: string) => {
 };
 
 const buildInvoiceClientPrefix = (companyName?: string, clientId?: string) => {
-    const normalizedName = String(companyName || '')
+    const rawName = String(companyName || '').trim();
+    if (!rawName) return 'FAC';
+
+    const normalizedName = rawName
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '')
-        .replace(/[^a-zA-Z0-9]/g, '')
+        .replace(/[^a-zA-Z0-9\s]/g, '')
         .toUpperCase();
-    const namePart = normalizedName.slice(0, 4) || 'CLNT';
-    const normalizedId = String(clientId || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-    const idPart = normalizedId.slice(-3);
-    return idPart ? `${namePart}-${idPart}` : namePart;
+
+    const words = normalizedName.split(/\s+/).filter(w => w.length > 0);
+    let namePart = '';
+
+    if (words.length >= 2) {
+        // Prend la première lettre de chaque mot (ex: "Hôtel de la Plage" -> "HDLP")
+        namePart = words.map(w => w[0]).join('').slice(0, 5);
+    } else {
+        // Si un seul mot, prend les 4 premières lettres
+        namePart = normalizedName.slice(0, 4);
+    }
+
+    return namePart || 'FAC';
 };
+
 
 const computeDefaultInvoiceNumber = (existing: any[], companyName?: string, clientId?: string) => {
     const now = new Date();
@@ -272,7 +284,7 @@ export const CreateInvoice = ({ onBack, onShowHistory, onInvoiceSaved, initialIn
         [settings.tva_rates]
     );
 
-    const [lines, setLines] = React.useState<InvoiceLine[]>([buildEmptyLine([20])]);
+    const [lines, setLines] = React.useState<InvoiceLine[]>([]);
 
     const loadBillingData = React.useCallback(async () => {
         try {
@@ -395,11 +407,11 @@ export const CreateInvoice = ({ onBack, onShowHistory, onInvoiceSaved, initialIn
             return currentTtcByRate;
         }
         const configuredRate = Number(selectedItem?.tax_rate ?? 0);
-        const preferredRate = tvaRates.includes(configuredRate)
+        const preferredRate = tvaRates?.includes(configuredRate)
             ? configuredRate
-            : (tvaRates.find((rate) => Number(currentTtcByRate?.[rate] ?? 0) > 0) ?? tvaRates[0]);
+            : (tvaRates?.find((rate) => Number(currentTtcByRate?.[rate] ?? 0) > 0) ?? tvaRates?.[0]);
         return Object.fromEntries(
-            tvaRates.map((rate) => [rate, rate === preferredRate ? unitPriceTtc * quantity : 0])
+            (tvaRates || []).map((rate) => [rate, rate === preferredRate ? unitPriceTtc * quantity : 0])
         ) as Record<number, number>;
     };
 
@@ -748,6 +760,7 @@ body { margin: 0; padding: 0; background: #ffffff; }
             };
             const imgData = await toPng(clone, toPngOpts);
 
+            const { jsPDF } = await import('jspdf');
             const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
             const pageWidth = 210;
             const pageHeight = 297;
@@ -820,7 +833,7 @@ body { margin: 0; padding: 0; background: #ffffff; }
             // Générer le PDF côté frontend comme avant
             const pdfBase64 = await generatePreviewPdfBase64();
             const filename = `${payload.invoiceNumber || 'facture'}.pdf`;
-            await moduleApi.sendFactureEmail(invoiceId, { to: email, pdfBase64, filename });
+            await moduleApi.sendFactureEmail(invoiceId, { to: email, pdfBase64, filename, invoicePayload: payload });
             await saveCurrentInvoice(payload);
             // Enregistrement action email dans l'historique
             if (invoiceId && user?.clientId) {
@@ -972,7 +985,13 @@ body { margin: 0; padding: 0; background: #ffffff; }
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                             <div className="flex flex-col gap-1">
                                 <label className="text-[10px] uppercase tracking-widest font-bold text-[var(--text-muted)]">Numero de facture</label>
-                                <input value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} className="h-8 px-3 text-sm bg-[var(--bg-soft)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] outline-none focus:border-[var(--accent)]" />
+                                <input 
+                                    value={invoiceNumber} 
+                                    onChange={(e) => setInvoiceNumber(e.target.value)} 
+                                    readOnly={user?.type !== 'admin' && !user?.impersonatedBySuperAdmin}
+                                    className={`h-8 px-3 text-sm bg-[var(--bg-soft)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] outline-none focus:border-[var(--accent)] ${user?.type !== 'admin' && !user?.impersonatedBySuperAdmin ? 'opacity-70 cursor-not-allowed' : ''}`} 
+                                    title={user?.type !== 'admin' && !user?.impersonatedBySuperAdmin ? "Le numéro de facture est généré automatiquement" : ""}
+                                />
                             </div>
                             <div className="flex flex-col gap-1">
                                 <label className="text-[10px] uppercase tracking-widest font-bold text-[var(--text-muted)]">Date de facture</label>
@@ -1180,7 +1199,7 @@ body { margin: 0; padding: 0; background: #ffffff; }
                             ) : (
                                 <div className="text-sm font-black tracking-[0.2em] text-slate-500 mb-2">LOGO</div>
                             )}
-                            <h1 className="text-xl font-bold text-slate-800">{settings.company_name || user?.companyName || 'Nom de l’établissement'}</h1>
+                            <h1 className="text-xl font-bold text-slate-800">{settings.company_name || user?.company_name || user?.name || 'Nom de l’établissement'}</h1>
                             <div className="text-slate-600 text-xs mt-1 leading-snug">
                                 <p>{settings.address || '-'}</p>
                                 <p>{[settings.postal_code, settings.city].filter(Boolean).join(' ') || '-'}</p>
@@ -1304,7 +1323,7 @@ body { margin: 0; padding: 0; background: #ffffff; }
                                 </div>
 
                                 <div className="flex justify-between text-slate-600 text-[10px] font-black uppercase tracking-tight pt-1">
-                                    <span>Total des taxes (TVA) :</span>
+                                    <span>Total TVA cumulé :</span>
                                     <span>{toCurrency(totalTva)}</span>
                                 </div>
 
@@ -1336,7 +1355,7 @@ body { margin: 0; padding: 0; background: #ffffff; }
                         <div className="invoice-legal-footer pt-4 border-t border-slate-100 text-center">
                             <div className="space-y-1 opacity-80">
                                 <p className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] mb-1">
-                                    {settings.company_name || 'Votre établissement'}
+                                    {settings.company_name || user?.company_name || user?.name || 'Votre établissement'}
                                 </p>
                                 <div className="text-[8px] text-slate-400 leading-relaxed font-medium flex flex-wrap justify-center gap-x-2 gap-y-0.5 uppercase tracking-wide">
                                     {settings.rcs_ville && settings.rcs_numero && <span>{`RCS ${settings.rcs_ville} ${settings.rcs_numero}`}</span>}

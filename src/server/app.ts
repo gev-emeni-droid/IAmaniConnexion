@@ -69,17 +69,23 @@ if (!fs.existsSync(supportRoot)) {
     fs.mkdirSync(supportRoot, { recursive: true });
 }
 
-app.use('/api/*', cors());
+app.use('/api/*', cors({
+    origin: '*',
+    allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    exposeHeaders: ['Content-Length'],
+    maxAge: 600,
+}));
 app.use('/uploads/*', serveStatic({
     root: './uploads',
     rewriteRequestPath: (p: string) => p.replace(/^\/uploads/, '')
 } as any));
 
-app.use('*', async (c, next) => {
-    console.log(`[Hono Request] ${c.req.method} ${c.req.path}`);
-    await next();
-    console.log(`[Hono Response] ${c.req.method} ${c.req.path} -> ${c.res.status}`);
-});
+// app.use('*', async (c, next) => {
+//     console.log(`[Hono Request] ${c.req.method} ${c.req.path}`);
+//     await next();
+//     console.log(`[Hono Response] ${c.req.method} ${c.req.path} -> ${c.res.status}`);
+// });
 
 // Helper to get DB (D1 or Local)
 const getDb = (c: any) => {
@@ -580,10 +586,10 @@ const sendSupportNotification = async (c: any, opts: { to: string; senderName: s
     if (!resendKey || !opts.to) return;
     const resend = new Resend(resendKey);
     // Génère le lien vers le dashboard du client concerné
-    const baseUrl = process.env.FRONTEND_URL || 'https://app.l-iamani.com';
+    const baseUrl = process.env.FRONTEND_URL || 'https://gestion.l-iamani.com';
     const dashboardUrl = opts.clientId ? `${baseUrl}/dashboard/${opts.clientId}/support` : `${baseUrl}/support`;
     await resend.emails.send({
-        from: "L'IAmani <notification@l-iamani.com>",
+            from: "L'IAmani <notification@gestion.l-iamani.com>",
         to: opts.to,
         subject: `Réponse du support L'IAmani - ${opts.companyName}`,
         html: `
@@ -624,7 +630,9 @@ const adminOnly = async (c: any, next: any) => {
 
 const superAdminOnly = async (c: any, next: any) => {
     const user = c.get('user');
-    if (user.type !== 'admin' || user.email !== SUPER_ADMIN_EMAIL) {
+    const userEmail = String(user?.email || '').toLowerCase();
+    if (user.type !== 'admin' || userEmail !== SUPER_ADMIN_EMAIL.toLowerCase()) {
+        console.warn(`[AUTH] SuperAdmin access denied for: ${userEmail}`);
         return c.json({ error: 'Super Admin access required' }, 403);
     }
     await next();
@@ -817,7 +825,7 @@ const loginHandler = async (c: any) => {
         const mustChange = user.is_temporary_password === 1;
         const payload = {
             id: user.id,
-            email: user.email,
+            email: String(user.email || '').toLowerCase(),
             type,
             clientId: type === 'admin' ? null : (type === 'client' ? user.id : user.client_id),
             isTemporary: mustChange,
@@ -983,12 +991,11 @@ const meHandler = async (c: any) => {
                 : ((user as any).clientId ?? (userData as any).id ?? null);
             (userData as any).impersonatedBySuperAdmin = Boolean((user as any).impersonatedBySuperAdmin);
             (userData as any).originalAdminEmail = (user as any).originalAdminEmail || null;
-            console.log(`[DEBUG] Found user data: ${JSON.stringify(userData)}`);
-        } else {
-            console.warn(`[DEBUG] No user data found for id: ${user.id} in table for type: ${user.type}`);
+            // Clear password and other sensitive data just in case
+            delete (userData as any).password;
         }
 
-        return c.json(userData);
+        return c.json(userData || { error: 'User data not found' });
     } catch (err: any) {
         console.error(`[DEBUG] Error in /api/me: ${err.message}`);
         return c.json({ error: err.message }, 500);
@@ -1192,6 +1199,16 @@ app.get('/api/admin/clients', authMiddleware, superAdminOnly, async (c) => {
     return c.json(clients);
 });
 
+app.delete('/api/admin/clients/:id', authMiddleware, superAdminOnly, async (c) => {
+    const id = c.req.param('id');
+    console.log(`[ADMIN] Deleting client: ${id}`);
+    const db = getDb(c);
+    await db.prepare('DELETE FROM clients WHERE id = ?').run(id);
+    return c.json({ success: true });
+});
+
+app.options('/api/admin/clients/:id', cors());
+
 app.post('/api/admin/clients', authMiddleware, superAdminOnly, async (c) => {
     try {
         const { name, email, username, company_name, logo_url, tva_rates, enable_cover_count, modules: selectedModules } = await c.req.json();
@@ -1271,7 +1288,7 @@ app.post('/api/admin/clients', authMiddleware, superAdminOnly, async (c) => {
             const resend = new Resend(resendKey);
             try {
                 await resend.emails.send({
-                    from: "L'IAmani <notification@l-iamani.com>",
+                        from: "L'IAmani <notification@gestion.l-iamani.com>",
                     to: email,
                     subject: "Votre compte client L'IAmani",
                     html: `
@@ -1437,14 +1454,6 @@ app.patch('/api/admin/clients/:id', authMiddleware, superAdminOnly, async (c) =>
     }
 });
 
-app.delete('/api/admin/clients/:id', authMiddleware, superAdminOnly, async (c) => {
-    const id = c.req.param('id');
-    const db = getDb(c);
-    // Cascade delete is handled by foreign keys in schema
-    await db.prepare('DELETE FROM clients WHERE id = ?').run(id);
-    return c.json({ success: true });
-});
-
 app.get('/api/admin/clients/:id/factures', authMiddleware, superAdminOnly, async (c) => {
     try {
         const clientId = c.req.param('id');
@@ -1578,7 +1587,7 @@ app.post('/api/admin/clients/:id/reset-password', authMiddleware, superAdminOnly
     if (resendKey) {
         const resend = new Resend(resendKey);
         await resend.emails.send({
-            from: "L'IAmani <notification@l-iamani.com>",
+                from: "L'IAmani <notification@gestion.l-iamani.com>",
             to: client.email,
             subject: "Réinitialisation de votre mot de passe L'IAmani",
             html: `
@@ -1626,7 +1635,7 @@ app.post('/api/admin/clients/:id/force-reset', authMiddleware, superAdminOnly, a
         const resend = new Resend(resendKey);
         const resetLink = `${c.req.url.split('/api')[0]}/reset-password?token=${resetToken}`;
         await resend.emails.send({
-            from: "L'IAmani <notification@l-iamani.com>",
+                from: "L'IAmani <notification@gestion.l-iamani.com>",
             to: client.email,
             subject: "Réinitialisation obligatoire de votre mot de passe L'IAmani",
             html: `
@@ -1689,14 +1698,16 @@ app.get('/api/admin/clients/:id/modules', authMiddleware, adminOnly, async (c) =
     return c.json(modules);
 });
 
-app.post('/api/admin/clients/:id/modules', authMiddleware, adminOnly, async (c) => {
+app.put('/api/admin/clients/:id/modules', authMiddleware, adminOnly, async (c) => {
     const clientId = c.req.param('id');
     const { modules } = await c.req.json();
     const db = getDb(c);
     
     for (const m of modules) {
+        const moduleName = m.module_name || m.name;
+        const isActive = m.is_active !== undefined ? m.is_active : (m.active ? 1 : 0);
         await db.prepare('UPDATE client_modules SET is_active = ? WHERE client_id = ? AND module_name = ?')
-          .run(m.active ? 1 : 0, clientId, m.name);
+          .run(isActive ? 1 : 0, clientId, moduleName);
     }
     
     return c.json({ success: true });
@@ -1925,7 +1936,7 @@ app.post('/api/admin/clients/:clientId/collaborators/:id/reset-password', authMi
         if (resendKey) {
             const resend = new Resend(resendKey);
             await resend.emails.send({
-                from: "L'IAmani <notification@l-iamani.com>",
+                    from: "L'IAmani <notification@gestion.l-iamani.com>",
                 to: collaborator.email,
                 subject: "Vos nouveaux accès collaborateur L'IAmani",
                 html: `
@@ -1981,7 +1992,7 @@ app.post('/api/admin/clients/:clientId/collaborators/:id/force-reset', authMiddl
         if (resendKey) {
             const resend = new Resend(resendKey);
             await resend.emails.send({
-                from: "L'IAmani <notification@l-iamani.com>",
+                    from: "L'IAmani <notification@gestion.l-iamani.com>",
                 to: collaborator.email,
                 subject: "Réinitialisation obligatoire de votre mot de passe L'IAmani",
                 html: `
@@ -2496,7 +2507,7 @@ app.post('/api/evenementiel/notify-update', authMiddleware, moduleAccessMiddlewa
         for (const recipient of recipients) {
             const firstName = recipient.first_name || 'collaborateur';
             await resend.emails.send({
-                from: "L'IAmani <notification@l-iamani.com>",
+                    from: "L'IAmani <notification@gestion.l-iamani.com>",
                 to: recipient.email,
                 subject: `📅 Mise à jour du calendrier - ${clientName}`,
                 html: `
@@ -3632,16 +3643,27 @@ app.delete('/api/crm/contacts/:id', authMiddleware, moduleAccessMiddleware, asyn
 });
 
 const buildInvoiceClientPrefix = (companyName?: string, clientId?: string) => {
-    const normalizedName = String(companyName || '')
+    const rawName = String(companyName || '').trim();
+    if (!rawName) return 'FAC';
+
+    const normalizedName = rawName
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '')
-        .replace(/[^a-zA-Z0-9]/g, '')
+        .replace(/[^a-zA-Z0-9\s]/g, '')
         .toUpperCase();
-    const namePart = normalizedName.slice(0, 4) || 'CLNT';
-    const normalizedId = String(clientId || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-    const idPart = normalizedId.slice(-3);
-    return idPart ? `${namePart}-${idPart}` : namePart;
+
+    const words = normalizedName.split(/\s+/).filter(w => w.length > 0);
+    let namePart = '';
+
+    if (words.length >= 2) {
+        namePart = words.map(w => w[0]).join('').slice(0, 5);
+    } else {
+        namePart = normalizedName.slice(0, 4);
+    }
+
+    return namePart || 'FAC';
 };
+
 
 const isValidEmailAddress = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
 
@@ -3700,7 +3722,32 @@ const buildFacturePdfBuffer = (params: { invoice: any; payload: any; settings: a
 
     contentLines.push('');
     contentLines.push(`Total HT: ${totalHt.toFixed(2)} EUR`);
-    contentLines.push(`TVA: ${totalTva.toFixed(2)} EUR`);
+    
+    // Detailed TVA breakdown
+    const tvaDetails: Record<number, number> = {};
+    lines.forEach((line: any) => {
+        if (line.ttcByRate) {
+            Object.entries(line.ttcByRate).forEach(([rateStr, ttcValue]) => {
+                const rate = Number(rateStr);
+                const ttc = Number(ttcValue || 0);
+                if (ttc > 0) {
+                    const ht = ttc / (1 + rate / 100);
+                    const tva = ttc - ht;
+                    tvaDetails[rate] = (tvaDetails[rate] || 0) + tva;
+                }
+            });
+        }
+    });
+
+    const sortedRates = Object.keys(tvaDetails).map(Number).sort((a, b) => a - b);
+    if (sortedRates.length > 0) {
+        sortedRates.forEach(rate => {
+            contentLines.push(`TVA (${rate}%): ${tvaDetails[rate].toFixed(2)} EUR`);
+        });
+    } else {
+        contentLines.push(`TVA: ${totalTva.toFixed(2)} EUR`);
+    }
+
     contentLines.push(`Total TTC: ${totalTtc.toFixed(2)} EUR`);
 
     let y = 795;
@@ -3794,7 +3841,7 @@ app.post('/api/facture', authMiddleware, moduleAccessMiddleware, async (c) => {
         const body = await c.req.json();
         const id = String(body.id || crypto.randomUUID());
         const clientProfile = await db.prepare('SELECT company_name FROM clients WHERE id = ?').get(user.clientId) as any;
-        const clientPrefix = buildInvoiceClientPrefix(clientProfile?.company_name || user?.companyName || '', user.clientId);
+        const clientPrefix = buildInvoiceClientPrefix(clientProfile?.company_name || user?.company_name || '', user.clientId);
         const invoiceNumber = String(body.invoiceNumber || `${clientPrefix}-${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(Date.now()).slice(-4)}`);
         const customerName = String(body.clientName || body.customer_name || 'Client');
         const crmContactIdRaw = String(body.crmContactId || body.crm_contact_id || '').trim();
@@ -3930,7 +3977,7 @@ app.post('/api/facture/:id/send-email', authMiddleware, moduleAccessMiddleware, 
                 const resend = new Resend(resendKey);
 
                 const emailResult = await resend.emails.send({
-                    from: `${senderLabel} <notification@l-iamani.com>`,
+                    from: `${senderLabel} <notification@gestion.l-iamani.com>`,
                     to: recipientEmail,
                     subject: `[${establishmentName}] Votre facture du "${displayDate}"`,
                     text: `Bonjour,\n\nVous trouverez ci-joint votre facture du ${displayDate}, bonne réception.\n\nCordialement,\n${establishmentName}`,
@@ -4339,7 +4386,7 @@ app.post('/api/factures/:id/send', authMiddleware, async (c) => {
     const resend = new Resend(resendKey);
     try {
         await resend.emails.send({
-            from: "L'IAmani <notification@l-iamani.com>",
+            from: "L'IAmani <notification@gestion.l-iamani.com>",
             to: email,
             subject: `Votre facture L'IAmani n°${facture.invoice_number}`,
             html: `

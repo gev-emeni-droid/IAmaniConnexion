@@ -2,10 +2,10 @@
 const ALL_MODULES = [
     { name: 'planning', label: 'Planning' },
     { name: 'evenementiel', label: 'Événementiel' },
-    { name: 'facture', label: 'Factures' },
+    { name: 'facture', label: 'Facture' },
+    { name: 'crm', label: 'CRM' },
     { name: 'employes', label: 'Postes & Employés' },
-    { name: 'crm', label: 'CRM Contacts' },
-    { name: 'pdf', label: 'ConvertisseurPDF' },
+    { name: 'convertisseur', label: 'ConvertisseurPDF' },
     { name: 'support', label: 'Support' },
     { name: 'rh', label: 'RH' }
 ];
@@ -52,7 +52,7 @@ import {
     Clock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { authApi, adminApi, moduleApi, supportApi, dashboardApi } from './lib/api';
+import { authApi, adminApi, moduleApi, supportApi, dashboardApi, planningApi } from './lib/api';
 import { extractRowsFromPdfClient, extractEvenementielRowsFromPdfClient } from './lib/pdfExtractor';
 import { resolveLogoUrl } from './lib/resolveLogoUrl';
 import { EvenementielModule } from './components/Evenementiel/EvenementielModule';
@@ -64,6 +64,7 @@ import { AdminPlanningConfig } from './components/Admin/AdminPlanningConfig';
 import { PostesEmployesModule } from './components/Employes/PostesEmployesModule';
 import { PlanningTableView } from './components/Planning/PlanningTableView';
 import { SupportModal } from './components/Support/SupportModal';
+import { InfoModal } from './components/InfoModal';
 import { useTheme } from './hooks/useTheme';
 
 
@@ -146,15 +147,43 @@ const Layout = ({ children }: any) => {
 
     const resolvedLogoUrl = resolveLogoUrl(user?.logoUrl);
 
+    const loadModules = React.useCallback(async () => {
+        try {
+            const modules = await authApi.getMyModules();
+            setActiveModules(modules.filter((m: any) => m.is_active === 1).map((m: any) => m.module_name));
+        } catch (e) {
+            console.error('Failed to load active modules', e);
+        }
+    }, [authApi]);
+
+    const checkStatus = React.useCallback(async () => {
+        try {
+            const me = await authApi.getMe();
+            if (me.status === 'blocked') {
+                logout();
+                navigate('/login');
+            }
+        } catch (e) {
+            logout();
+            navigate('/login');
+        }
+    }, [authApi, logout, navigate]);
+
+    const refreshClientUnreadCount = React.useCallback(async () => {
+        if (user && user.type !== 'admin') {
+            try {
+                const data = await supportApi.getClientUnreadCount();
+                setClientSupportUnreadCount(Number(data?.count || 0));
+            } catch {}
+        }
+    }, [user]);
+
     React.useEffect(() => {
         if (user && user.type !== 'admin') {
             loadModules();
             checkStatus();
         }
-    }, [user]);
-
-    if (loading) return null;
-    if (!user) return null;
+    }, [user, loadModules, checkStatus]);
 
     React.useEffect(() => {
         if (!user) return;
@@ -178,37 +207,8 @@ const Layout = ({ children }: any) => {
         };
     }, [user]);
 
-    const checkStatus = async () => {
-        try {
-            const me = await authApi.getMe();
-            if (me.status === 'blocked') {
-                logout();
-                navigate('/login');
-            }
-        } catch (e) {
-            logout();
-            navigate('/login');
-        }
-    };
-
-    const refreshClientUnreadCount = async () => {
-        if (user && user.type !== 'admin') {
-            try {
-                const data = await supportApi.getClientUnreadCount();
-                setClientSupportUnreadCount(Number(data?.count || 0));
-            } catch {}
-        }
-    };
-
-    const loadModules = async () => {
-        try {
-            // For clients/collaborators, we fetch their active modules via the /me/modules endpoint
-            const modules = await authApi.getMyModules();
-            setActiveModules(modules.filter((m: any) => m.is_active === 1).map((m: any) => m.module_name));
-        } catch (e) {
-            console.error('Failed to load active modules', e);
-        }
-    };
+    if (loading) return null;
+    if (!user) return null;
 
     const handleLogout = () => {
         logout();
@@ -287,7 +287,7 @@ const Layout = ({ children }: any) => {
                             {resolvedLogoUrl ? (
                                 <img
                                     src={resolvedLogoUrl}
-                                    alt={user?.companyName || 'Logo client'}
+                                    alt={user?.company_name || 'Logo client'}
                                     className="w-full h-full object-cover"
                                     onError={(e) => {
                                         (e.currentTarget as HTMLImageElement).style.display = 'none';
@@ -297,7 +297,7 @@ const Layout = ({ children }: any) => {
                                 <ShieldCheck className="text-black" size={20} />
                             )}
                         </div>
-                        {!isCollapsed && <span className="font-bold text-[36px] leading-none tracking-tight text-slate-700 dark:text-[var(--text-primary)]">{user?.companyName || "L'IAmani"}</span>}
+                        {!isCollapsed && <span className="font-bold text-[36px] leading-none tracking-tight text-slate-700 dark:text-[var(--text-primary)]">{user?.company_name || "L'IAmani"}</span>}
                     </div>
                     {!isCollapsed && (
                         <button
@@ -342,7 +342,7 @@ const Layout = ({ children }: any) => {
                                         </span>
                                     )}
                                 </span>
-                                {!isCollapsed && <span className="font-medium text-[15px] min-w-0 truncate">Support Client</span>}
+                                {!isCollapsed && <span className="font-medium text-[15px] min-w-0 truncate">Support client</span>}
                             </Link>
                         </>
                     ) : (
@@ -368,7 +368,7 @@ const Layout = ({ children }: any) => {
                                         </span>
                                     )}
                                 </span>
-                                {!isCollapsed && <span className="font-medium text-[15px] min-w-0 truncate">Contacter l'admin</span>}
+                                {!isCollapsed && <span className="font-medium text-[15px] min-w-0 truncate">Support client</span>}
                             </button>
                         </>
                     )}
@@ -540,6 +540,7 @@ const LoginView = () => {
     const [identifier, setIdentifier] = React.useState('');
     const [password, setPassword] = React.useState('');
     const [error, setError] = React.useState('');
+    const [showInfoModal, setShowInfoModal] = React.useState(true);
     const stars = React.useMemo(() => Array.from({ length: 160 }, (_, i) => ({
         id: i,
         left: `${(i * 7.17) % 100}%`,
@@ -571,6 +572,13 @@ const LoginView = () => {
 
     return (
         <div className="min-h-screen relative overflow-hidden bg-[#030712] flex items-center justify-center p-6">
+            <InfoModal
+                id="login_welcome_v1"
+                title="Bienvenue chez L'IAmani"
+                message="Bienvenue dans la nouvelle interface de l'IAmani. Veuillez vous connecter avec vos identifiants habituels, ou contacter le développeur du site en cas de besoin."
+                isOpen={showInfoModal}
+                onClose={() => setShowInfoModal(false)}
+            />
             <div className="absolute inset-0 pointer-events-none">
                 <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.16),transparent_0%,transparent_42%),radial-gradient(circle_at_bottom,_rgba(99,102,241,0.16),transparent_0%,transparent_48%)]" />
                 {stars.map((star) => (
@@ -650,6 +658,35 @@ const LoginView = () => {
                     </p>
                 </div>
             </motion.div>
+        </div>
+    );
+};
+
+const DigitalClock = () => {
+    const [time, setTime] = React.useState(new Date());
+
+    React.useEffect(() => {
+        const timer = setInterval(() => setTime(new Date()), 1000);
+        return () => clearInterval(timer);
+    }, []);
+
+    const hours = String(time.getHours()).padStart(2, '0');
+    const minutes = String(time.getMinutes()).padStart(2, '0');
+    const seconds = String(time.getSeconds()).padStart(2, '0');
+
+    return (
+        <div className="flex flex-col items-center justify-center h-full">
+            <div className="text-[var(--text-muted)] text-[9px] font-bold uppercase tracking-widest mb-1">Heure actuelle</div>
+            <div className="flex items-center gap-2 text-3xl md:text-4xl font-black tracking-tighter text-[var(--text-primary)] font-mono">
+                <span>{hours}</span>
+                <span className="animate-pulse text-[#2f9e9e]">:</span>
+                <span>{minutes}</span>
+                <span className="animate-pulse text-[#2f9e9e] text-xl md:text-2xl">:</span>
+                <span className="text-xl md:text-2xl text-[var(--text-muted)] w-[1.2ch]">{seconds}</span>
+            </div>
+            <div className="text-[var(--text-muted)] text-[10px] mt-1 font-medium capitalize">
+                {time.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}
+            </div>
         </div>
     );
 };
@@ -765,49 +802,8 @@ const DashboardView = () => {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
-                <div className="lg:col-span-2 bg-[var(--bg-card)] rounded-2xl border border-[var(--border-color)] p-8 transition-colors duration-200">
-                    <h2 className="text-lg font-bold mb-8 text-[var(--text-primary)]">Activité récente</h2>
-                    <div className="space-y-8">
-                        {user?.type === 'admin' ? (
-                            [1, 2, 3].map((_, i) => (
-                                <div key={i} className="flex items-center gap-6 pb-8 border-b border-[var(--border-color)] last:border-0 last:pb-0">
-                                    <div className="w-12 h-12 bg-[var(--bg-soft)] rounded-full flex items-center justify-center">
-                                        <ChevronRight size={18} className="text-[var(--text-muted)]" />
-                                    </div>
-                                    <div className="flex-1">
-                                        <p className="text-sm font-bold text-[var(--text-primary)]">Nouveau client créé</p>
-                                        <p className="text-xs text-[var(--text-muted)] mt-1">Activité administration</p>
-                                    </div>
-                                    <div className="text-sm font-bold text-green-400">Actif</div>
-                                </div>
-                            ))
-                        ) : loading ? (
-                            <div className="text-sm text-[var(--text-muted)]">Chargement des activités...</div>
-                        ) : recentActivity.length === 0 ? (
-                            <div className="text-sm text-[var(--text-muted)]">Aucune activité récente pour le moment.</div>
-                        ) : recentActivity.map((item) => {
-                            const presentation = getActivityPresentation(item.type);
-                            const ActivityIcon = presentation.icon;
-                            return (
-                                <div key={item.id} className="flex items-center gap-6 pb-8 border-b border-[var(--border-color)] last:border-0 last:pb-0">
-                                    <div className="w-12 h-12 bg-[var(--bg-soft)] rounded-full flex items-center justify-center">
-                                        <ActivityIcon size={18} className={presentation.color} />
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <p className="text-sm font-bold text-[var(--text-primary)]">{item.title}</p>
-                                        <p className="text-xs text-[var(--text-muted)] mt-1 truncate">
-                                            {formatRelativeTime(item.created_at)}{item.subject ? ` • ${item.subject}` : ''}{item.detail ? ` • ${formatActivityDetail(item.detail)}` : ''}
-                                        </p>
-                                    </div>
-                                    <div className="text-sm font-bold text-green-400 shrink-0">
-                                        {typeof item.value === 'number' && item.value > 0
-                                            ? new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(item.value)
-                                            : '—'}
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
+                <div className="lg:col-span-2 bg-[var(--bg-card)] rounded-2xl border border-[var(--border-color)] p-8 transition-colors duration-200 flex flex-col items-center justify-center min-h-[150px]">
+                    <DigitalClock />
                 </div>
                 
                 <div className="bg-[var(--bg-card)] text-[var(--text-primary)] rounded-2xl p-10 border border-[var(--border-color)] shadow-2xl relative overflow-hidden flex flex-col justify-between transition-colors duration-200">
@@ -818,7 +814,7 @@ const DashboardView = () => {
                         <p className="text-[var(--text-muted)] text-sm leading-relaxed mb-8">
                             {user?.type === 'admin' 
                                 ? 'Vérifiez l\'état des serveurs et les logs de sécurité de la plateforme.' 
-                                : 'Besoin d\'aide pour configurer vos modules ? Notre équipe est là pour vous.'}
+                                : 'Une question sur le fonctionnement, une demande de modification ou mise à jour, une demande d\'ajout d\'un système de gestion, ou tout ce qui pourrait vous faciliter votre travail ? Contactez le support client.'}
                         </p>
                         {user?.type === 'admin' ? (
                             <button className="bg-[var(--text-primary)] text-[var(--bg-card)] px-8 py-4 rounded-xl font-bold text-sm hover:opacity-90 transition-all shadow-lg">
@@ -953,10 +949,16 @@ const SupportAdminView = () => {
                                 <button
                                     key={t.id}
                                     onClick={() => setSelected(t)}
-                                    className={`w-full text-left p-3 rounded-xl border ${selected?.id === t.id ? 'border-white/40 bg-white/5' : 'border-white/10 hover:border-white/20'}`}
+                                    className={`w-full text-left p-4 rounded-xl border transition-all ${selected?.id === t.id ? 'border-white/40 bg-white/5 ring-1 ring-white/10' : 'border-white/10 hover:border-white/20'}`}
                                 >
-                                    <p className="text-white font-semibold truncate">{t.company_name || t.client_name}</p>
-                                    <p className="text-xs text-gray-500">{t.unread_count || 0} non lus</p>
+                                    <div className="flex justify-between items-start mb-1">
+                                        <p className="text-white font-bold truncate flex-1">{t.company_name}</p>
+                                        {t.unread_count > 0 && (
+                                            <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full ml-2 animate-pulse">{t.unread_count}</span>
+                                        )}
+                                    </div>
+                                    <p className="text-[10px] text-gray-500 uppercase font-bold tracking-tight mb-1">{t.creator_name || 'Client'}</p>
+                                    <p className="text-[10px] text-gray-600">{new Date(t.created_at).toLocaleDateString()}</p>
                                 </button>
                             ))}
                         </div>
@@ -1045,13 +1047,7 @@ const AdminClientsView = () => {
         logo_url: '',
         tva_rates: [20] as number[],
         enable_cover_count: false,
-        modules: [
-            { name: 'planning', active: true },
-            { name: 'evenementiel', active: false },
-            { name: 'facture', active: false },
-            { name: 'employes', active: false },
-            { name: 'crm', active: false }
-        ]
+        modules: ALL_MODULES.map(m => ({ name: m.name, active: m.name === 'planning' }))
     });
 
     React.useEffect(() => {
@@ -1111,13 +1107,7 @@ const AdminClientsView = () => {
                 logo_url: '',
                 tva_rates: [20],
                 enable_cover_count: false,
-                modules: [
-                    { name: 'planning', active: true },
-                    { name: 'evenementiel', active: false },
-                    { name: 'facture', active: false },
-                    { name: 'employes', active: false },
-                    { name: 'crm', active: false }
-                ]
+                modules: ALL_MODULES.map(m => ({ name: m.name, active: m.name === 'planning' }))
             });
             loadClients();
         } catch (e: any) {
@@ -1304,7 +1294,7 @@ const AdminClientsView = () => {
                                 <div className="grid grid-cols-2 gap-2">
                                     {newClient.modules.map(m => (
                                         <button type="button" key={m.name} onClick={() => toggleModule(m.name)} className={`px-3 py-2 rounded-lg text-xs font-bold capitalize border ${m.active ? 'border-green-500/40 bg-green-500/10 text-green-400' : 'border-white/10 text-gray-500'}`}>
-                                            {m.name}
+                                            {ALL_MODULES.find(am => am.name === m.name)?.label || m.name}
                                         </button>
                                     ))}
                                 </div>
@@ -1595,9 +1585,9 @@ const AdminClientDetailView = () => {
                 company_country: currentClient.company_country || 'France',
                 company_employee_count: Number(currentClient.company_employee_count || 0),
             });
-            setModules(m);
-            setCollaborators(c);
-            setSpaces(s);
+            setModules(m || []);
+            setCollaborators(c || []);
+            setSpaces(s || []);
             setStaffTypes(staff || []);
             setAuditLogs(logs || []);
             const edits: Record<string, { name: string; color: string }> = {};
@@ -1614,9 +1604,15 @@ const AdminClientDetailView = () => {
 
     const handleUpdateModules = async (moduleName: string, active: boolean) => {
         try {
-            const updatedModules = modules.map(m => 
-                m.module_name === moduleName ? { ...m, is_active: active ? 1 : 0 } : m
-            );
+            // Rebuild the modules list from ALL_MODULES to ensure we include new ones
+            const updatedModules = ALL_MODULES.map(am => {
+                const existing = modules.find(rm => rm.module_name === am.name);
+                if (am.name === moduleName) {
+                    return { ...existing, module_name: am.name, is_active: active ? 1 : 0 };
+                }
+                return existing || { module_name: am.name, is_active: 0 };
+            });
+            
             await adminApi.updateClientModules(id!, updatedModules.map(m => ({
                 name: m.module_name,
                 active: m.is_active === 1
@@ -2078,20 +2074,23 @@ const AdminClientDetailView = () => {
                             Provisioning
                         </h2>
                         <div className="space-y-4">
-                            {modules.map((m) => (
-                                <div 
-                                    key={m.module_name}
-                                    className="flex items-center justify-between p-4 rounded-xl bg-black border border-white/5"
-                                >
-                                    <span className="capitalize font-medium text-white">{m.module_name}</span>
-                                    <button 
-                                        onClick={() => handleUpdateModules(m.module_name, m.is_active === 0)}
-                                        className="transition-all"
+                            {ALL_MODULES.map((m) => {
+                                const isActive = modules.find(rm => rm.module_name === m.name)?.is_active === 1;
+                                return (
+                                    <div 
+                                        key={m.name}
+                                        className="flex items-center justify-between p-4 rounded-xl bg-black border border-white/5"
                                     >
-                                        {m.is_active === 1 ? <ToggleRight size={32} className="text-white" /> : <ToggleLeft size={32} className="text-gray-700" />}
-                                    </button>
-                                </div>
-                            ))}
+                                        <span className="capitalize font-medium text-white">{m.label}</span>
+                                        <button 
+                                            onClick={() => handleUpdateModules(m.name, !isActive)}
+                                            className="transition-all"
+                                        >
+                                            {isActive ? <ToggleRight size={32} className="text-white" /> : <ToggleLeft size={32} className="text-gray-700" />}
+                                        </button>
+                                    </div>
+                                );
+                            })}
                         </div>
                     </div>
 
@@ -2525,7 +2524,7 @@ const AdminClientDetailView = () => {
                                     <div className="space-y-3">
                                         <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Taux de TVA</label>
                                         <div className="flex flex-wrap gap-2 min-h-[32px]">
-                                            {editData.tva_rates.map((rate) => (
+                                            {editData?.tva_rates?.map((rate) => (
                                                 <span key={rate} className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-bold bg-slate-100 dark:bg-white/10 text-slate-900 dark:text-white border border-slate-300 dark:border-white/20">
                                                     {rate}%
                                                     <button type="button" onClick={() => setEditData({ ...editData, tva_rates: editData.tva_rates.filter(r => r !== rate) })} className="ml-1 text-slate-500 hover:text-red-500 transition-colors font-normal leading-none">×</button>

@@ -8,7 +8,7 @@ import {
     Building2,
     User
 } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { motion } from 'motion/react';
 
 export const PlanningTableView = () => {
     const [events, setEvents] = useState<any[]>([]);
@@ -31,15 +31,25 @@ export const PlanningTableView = () => {
         }
     };
 
-    const filteredEvents = events.filter(event => {
-        const name = event.type === 'PRIVÉ' ? `${event.first_name || ''} ${event.last_name || ''}` : (event.company_name || '');
-        return name.toLowerCase().includes(searchTerm.toLowerCase());
-    });
+    const filteredEvents = events
+        .filter(event => {
+            const name = event.type === 'PRIVÉ' ? `${event.first_name || ''} ${event.last_name || ''}` : (event.company_name || '');
+            const isMatch = name.toLowerCase().includes(searchTerm.toLowerCase());
+            
+            if (!event.start_time) return false;
+
+            // On considère l'événement comme "à venir" s'il n'est pas encore terminé
+            const now = new Date();
+            const eventEnd = new Date(event.end_time || event.start_time);
+            
+            return isMatch && eventEnd.getTime() >= now.getTime();
+        })
+        .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
 
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between">
-                <h2 className="text-xl font-bold text-[var(--text-primary)]">Planning Événementiel</h2>
+                <h2 className="text-xl font-bold text-[var(--text-primary)]">Événements à venir</h2>
                 <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={16} />
                     <input 
@@ -57,11 +67,12 @@ export const PlanningTableView = () => {
                     <table className="w-full text-left border-collapse">
                         <thead>
                             <tr className="bg-[var(--bg-soft)] border-b border-[var(--border-color)]">
-                                <th className="px-6 py-4 text-[10px] font-bold text-gray-500 uppercase tracking-widest">Nom / Entreprise</th>
-                                <th className="px-6 py-4 text-[10px] font-bold text-gray-500 uppercase tracking-widest text-center">Pax</th>
-                                <th className="px-6 py-4 text-[10px] font-bold text-gray-500 uppercase tracking-widest">Horaires</th>
-                                <th className="px-6 py-4 text-[10px] font-bold text-gray-500 uppercase tracking-widest">Hôtesse Interne</th>
-                                <th className="px-6 py-4 text-[10px] font-bold text-gray-500 uppercase tracking-widest text-center">Extras Hôtesses</th>
+                                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">Date</th>
+                                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">Nom / Entreprise</th>
+                                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest text-center">Pax</th>
+                                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">Horaires</th>
+                                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">Hôtesse Interne</th>
+                                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest text-center">Extras Hôtesses</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-[var(--border-color)]">
@@ -100,6 +111,11 @@ export const PlanningTableView = () => {
                                         className="hover:bg-[var(--interactive-hover)] transition-all text-sm"
                                     >
                                         <td className="px-6 py-4">
+                                            <div className="text-[var(--text-primary)] font-bold text-xs">
+                                                {event.start_time ? new Date(event.start_time).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'}
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4">
                                             <div className="flex items-center gap-3">
                                                 <div className="w-8 h-8 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-400 shrink-0">
                                                     {event.type === 'PRIVÉ' ? <User size={14} /> : <Building2 size={14} />}
@@ -122,9 +138,9 @@ export const PlanningTableView = () => {
                                         <td className="px-6 py-4">
                                             <div className="flex flex-wrap gap-1">
                                                 {hotesseAssignments.length === 0 ? (
-                                                    <span className="text-gray-600 italic text-xs">Aucune</span>
+                                                    <span className="text-slate-400 dark:text-slate-600 italic text-xs">Aucune</span>
                                                 ) : hotesseAssignments.map((a: any, i: number) => (
-                                                    <span key={i} className="px-2 py-0.5 rounded bg-green-500/10 text-green-400 text-[10px] font-bold">
+                                                    <span key={i} className="px-2 py-0.5 rounded bg-green-500/10 text-green-600 dark:text-green-400 text-[10px] font-bold">
                                                         {a.employee_name}
                                                     </span>
                                                 ))}
@@ -132,12 +148,12 @@ export const PlanningTableView = () => {
                                         </td>
                                         <td className="px-6 py-4 text-center">
                                             {extras > 0 ? (
-                                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-orange-500/10 text-orange-400 text-xs font-bold border border-orange-500/20">
+                                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-orange-500/10 text-orange-600 dark:text-orange-400 text-xs font-bold border border-orange-500/20">
                                                     <AlertCircle size={12} />
                                                     {extras}
                                                 </span>
                                             ) : (
-                                                <span className="text-gray-600 text-xs">—</span>
+                                                <span className="text-slate-400 dark:text-slate-600 text-xs">—</span>
                                             )}
                                         </td>
                                     </motion.tr>

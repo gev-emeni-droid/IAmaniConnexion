@@ -33,17 +33,22 @@ export const adminApi = {
     resetCollaboratorPassword: (clientId: string, collaboratorId: string) => apiFetch(`/admin/clients/${clientId}/collaborators/${collaboratorId}/reset-password`, { method: 'POST' }),
     forceResetCollaboratorPassword: (clientId: string, collaboratorId: string) => apiFetch(`/admin/clients/${clientId}/collaborators/${collaboratorId}/force-reset-password`, { method: 'POST' }),
     getClientPlanningConfig: (clientId: string) => apiFetch(`/admin/clients/${clientId}/planning-config`),
-    saveClientPlanningConfig: (clientId: string, payload: { absenceCodes?: string[]; extraTypes?: string[] }) => apiFetch(`/admin/clients/${clientId}/planning-config`, { method: 'POST', body: JSON.stringify(payload) }),
+    saveClientPlanningConfig: (clientId: string, payload: { absenceCodes?: any[]; extraTypes?: string[] }) => apiFetch(`/admin/clients/${clientId}/planning-config`, { method: 'POST', body: JSON.stringify({ ...payload, client_id: clientId }) }),
+    getClientPlanningArchives: (clientId: string) => apiFetch(`/admin/clients/${clientId}/planning/archives`),
+    getClientPlanningArchiveDetail: (clientId: string, archiveId: string) => apiFetch(`/admin/clients/${clientId}/planning/archives/${archiveId}`),
+    deleteClientPlanningArchive: (clientId: string, archiveId: string) => apiFetch(`/admin/clients/${clientId}/planning/archives/${archiveId}`, { method: 'DELETE' }),
+    getClientDiagnostics: (clientId: string) => apiFetch(`/admin/clients/${clientId}/diagnostics`),
+    sanitizeClientAccount: (clientId: string) => apiFetch(`/admin/clients/${clientId}/sanitize`, { method: 'POST' }),
+    clearClientLogo: (clientId: string) => apiFetch(`/admin/clients/${clientId}/clear-logo`, { method: 'POST' }),
 };
 const API_URL = '/api';
 
 type ApiFetchOptions = RequestInit & { timeoutMs?: number };
 
-export async function apiFetch(endpoint: string, options: ApiFetchOptions = {}) {
+let writeQueue = Promise.resolve();
+
+export async function apiFetch(endpoint: string, options: ApiFetchOptions = {}, retryCount = 2) {
     const token = localStorage.getItem('token');
-    const controller = new AbortController();
-    const timeoutMs = typeof options.timeoutMs === 'number' ? options.timeoutMs : 10000;
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     const isFormData = options.body instanceof FormData;
 
     const headers: Record<string, string> = {
@@ -54,35 +59,75 @@ export async function apiFetch(endpoint: string, options: ApiFetchOptions = {}) 
     if (!isFormData && !headers['Content-Type']) {
         headers['Content-Type'] = 'application/json';
     }
-    try {
-        const response = await fetch(`${API_URL}${endpoint}`, {
-            ...options,
-            headers,
-            signal: controller.signal
-        });
-        clearTimeout(timeoutId);
 
-        let data;
-        const contentType = response.headers.get('content-type');
-        if (contentType && contentType.includes('application/json')) {
-            data = await response.json();
-        } else {
-            const text = await response.text();
-            data = { error: text || 'Non-JSON response received' };
+    const executeFetch = async () => {
+        // Debounce/Queue for write operations to stabilize HTTP2
+        if (options.method && options.method !== 'GET') {
+            // Chain to the existing queue
+            const currentWrite = writeQueue.then(async () => {
+                await new Promise(r => setTimeout(r, 50)); // Reduced security gap for stability
+            });
+            writeQueue = currentWrite;
+            await currentWrite;
         }
 
-        if (!response.ok) {
-            throw new Error(data.error || `Error ${response.status}: ${response.statusText}`);
-        }
+        const controller = new AbortController();
+        const timeoutMs = typeof options.timeoutMs === 'number' ? options.timeoutMs : 10000;
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-        return data;
-    } catch (error: any) {
-        clearTimeout(timeoutId);
-        if (error.name === 'AbortError') {
-            throw new Error('La requête a expiré (timeout)');
+        try {
+            const response = await fetch(`${API_URL}${endpoint}`, {
+                ...options,
+                headers,
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+
+            let data;
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+                data = await response.json();
+            } else {
+                const text = await response.text();
+                data = { error: text || 'Non-JSON response received' };
+            }
+
+            if (!response.ok) {
+                // If it's a 5xx or network error, we might want to retry, but for now we follow the retry logic
+                throw { status: response.status, message: data.error || `Error ${response.status}` };
+            }
+
+            return data;
+        } catch (error: any) {
+            clearTimeout(timeoutId);
+            throw error;
         }
-        throw error;
+    };
+
+    let lastError: any;
+    for (let i = 0; i <= retryCount; i++) {
+        try {
+            return await executeFetch();
+        } catch (error: any) {
+            lastError = error;
+            // Only retry on network errors or 5xx. Don't retry on 4xx (except maybe 429)
+            const isNetworkError = error instanceof TypeError || error.name === 'AbortError' || !error.status;
+            const isRetryableStatus = error.status >= 500 || error.status === 429;
+            
+            if (i < retryCount && (isNetworkError || isRetryableStatus)) {
+                console.warn(`API retry ${i + 1}/${retryCount} for ${endpoint}`, error);
+                // Wait before retrying (exponential backoff) - 2s, 4s
+                await new Promise(res => setTimeout(res, 2000 * (i + 1)));
+                continue;
+            }
+            break;
+        }
     }
+
+    if (lastError.name === 'AbortError') {
+        throw new Error('La requête a expiré (timeout)');
+    }
+    throw new Error(lastError.message || lastError.toString() || 'Erreur réseau');
 }
 
 export const authApi = {
@@ -152,14 +197,15 @@ export const dashboardApi = {
 export const supportApi = {
     getOpenTicket: () => apiFetch('/support/ticket/open'),
     getClientUnreadCount: () => apiFetch('/support/unread-count'),
-    sendClientMessage: (payload: any) => apiFetch('/support/messages', { method: 'POST', body: JSON.stringify(payload) }),
-    uploadFile: (formData: FormData) => apiFetch('/support/upload', { method: 'POST', body: formData }),
+    sendClientMessage: (payload: any) => apiFetch('/support/messages', { method: 'POST', body: JSON.stringify(payload), timeoutMs: 30000 }),
+    uploadFile: (formData: FormData) => apiFetch('/support/upload', { method: 'POST', body: formData, timeoutMs: 60000 }),
     getAdminUnreadCount: () => apiFetch('/admin/support/unread-count'),
     getAdminTickets: (status: 'OPEN' | 'CLOSED' = 'OPEN') => apiFetch(`/admin/support/tickets?status=${status}`),
     getAdminTicketMessages: (ticketId: string) => apiFetch(`/admin/support/tickets/${ticketId}/messages`),
     sendAdminMessage: (ticketId: string, payload: any) => apiFetch(`/admin/support/tickets/${ticketId}/messages`, { method: 'POST', body: JSON.stringify(payload) }),
     closeTicket: (ticketId: string) => apiFetch(`/admin/support/tickets/${ticketId}/close`, { method: 'PATCH' }),
     deleteTicket: (ticketId: string) => apiFetch(`/admin/support/tickets/${ticketId}`, { method: 'DELETE' }),
+    markAsRead: (messageIds: string[]) => apiFetch('/support/messages/read', { method: 'POST', body: JSON.stringify({ messageIds }) }),
 };
 
 export const planningApi = {
@@ -169,4 +215,15 @@ export const planningApi = {
     saveTemplates: (payload: any) => apiFetch('/planning/templates', { method: 'POST', body: JSON.stringify(payload) }),
     getSettings: () => apiFetch('/planning/settings'),
     saveSettings: (payload: any) => apiFetch('/planning/settings', { method: 'POST', body: JSON.stringify(payload) }),
+    listWeeks: () => apiFetch('/planning/weeks'),
+    deleteWeek: (id: string) => apiFetch(`/planning/week/${id}`, { method: 'DELETE' }),
+    // Archiving
+    getArchives: () => apiFetch('/planning/archives'),
+    getArchive: (weekStart: string) => apiFetch(`/planning/archive/${weekStart}`),
+    archiveWeek: (payload: any) => apiFetch('/planning/archive', { method: 'POST', body: JSON.stringify(payload) }),
+    deleteArchive: (id: string) => apiFetch(`/planning/archive/${id}`, { method: 'DELETE' }),
+    // Absences Longue Durée
+    getAbsences: () => apiFetch('/planning/absences'),
+    saveAbsence: (payload: any) => apiFetch('/planning/absences', { method: 'POST', body: JSON.stringify(payload) }),
+    deleteAbsence: (id: string) => apiFetch(`/planning/absences/${id}`, { method: 'DELETE' }),
 };

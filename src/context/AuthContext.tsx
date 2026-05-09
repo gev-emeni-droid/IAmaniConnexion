@@ -8,8 +8,8 @@ interface User {
     type: 'admin' | 'client' | 'collaborator';
     name: string;
     clientId?: string | null;
-    companyName?: string | null;
-    logoUrl?: string | null;
+    company_name?: string | null;
+    logo_url?: string | null;
     modules_access?: string[];
     isTemporary?: boolean;
     mustChangePassword?: boolean;
@@ -52,9 +52,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 try {
                     // Verify with backend
                     await refreshUser();
-                } catch (e) {
+                } catch (e: any) {
                     console.error('Token verification failed', e);
-                    logout();
+                    // Only logout if it's a definitive 401/403 or similar
+                    // If it's a network error (no status), we keep the current user state to avoid white screen
+                    if (e.message && (e.message.includes('401') || e.message.includes('403') || e.message.includes('Forbidden') || e.message.includes('Unauthorized'))) {
+                        logout();
+                    }
                 } finally {
                     setLoading(false);
                 }

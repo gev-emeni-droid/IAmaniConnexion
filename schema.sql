@@ -173,10 +173,13 @@ CREATE TABLE IF NOT EXISTS evenementiel (
     company_name TEXT,
     organizer_name TEXT,
     taken_by_id TEXT,
+    crm_contact_id TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
     FOREIGN KEY (calendar_id) REFERENCES evenementiel_calendars(id) ON DELETE CASCADE,
-    FOREIGN KEY (taken_by_id) REFERENCES employes(id) ON DELETE SET NULL
+    FOREIGN KEY (taken_by_id) REFERENCES employes(id) ON DELETE SET NULL,
+    FOREIGN KEY (crm_contact_id) REFERENCES crm_contacts(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS evenementiel_config (
@@ -249,15 +252,14 @@ CREATE TABLE IF NOT EXISTS crm_contacts (
     company_name TEXT,
     organizer_name TEXT,
     email TEXT,
-    phone TEXT NOT NULL,
+    phone TEXT,
     address TEXT,
     postal_code TEXT,
     city TEXT,
     country TEXT DEFAULT 'France',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
-    UNIQUE(client_id, phone)
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS evenementiel_event_assignments (
@@ -369,7 +371,7 @@ CREATE INDEX IF NOT EXISTS idx_planning_client_id ON planning(client_id);
 CREATE INDEX IF NOT EXISTS idx_evenementiel_client_id ON evenementiel(client_id);
 CREATE INDEX IF NOT EXISTS idx_facture_client_id ON facture(client_id);
 CREATE INDEX IF NOT EXISTS idx_employes_client_id ON employes(client_id);
-CREATE INDEX IF NOT EXISTS idx_crm_contacts_client_id ON crm_contacts(client_id);
+CREATE INDEX IF NOT EXISTS idx_crm_contacts_client_phone ON crm_contacts(client_id, phone);
 CREATE INDEX IF NOT EXISTS idx_evenementiel_calendar_id ON evenementiel(calendar_id);
 CREATE INDEX IF NOT EXISTS idx_event_documents_client_id ON event_documents(client_id);
 CREATE INDEX IF NOT EXISTS idx_event_documents_event_id ON event_documents(event_id);
@@ -390,3 +392,75 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_target_user ON audit_logs(target_user_
 CREATE INDEX IF NOT EXISTS idx_support_tickets_client_status ON support_tickets(client_id, status);
 CREATE INDEX IF NOT EXISTS idx_support_messages_ticket_created ON support_messages(ticket_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_support_messages_unread ON support_messages(is_read, sender_type);
+
+-- Tables Planning V2
+CREATE TABLE IF NOT EXISTS planning_weeks (
+    id TEXT PRIMARY KEY,
+    client_id TEXT NOT NULL,
+    week_start TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(client_id, week_start),
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS planning_templates (
+    id TEXT PRIMARY KEY,
+    client_id TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS planning_settings (
+    client_id TEXT PRIMARY KEY,
+    payload_json TEXT NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS planning_archives (
+    id TEXT PRIMARY KEY,
+    client_id TEXT NOT NULL,
+    week_start TEXT NOT NULL,
+    year INTEGER NOT NULL,
+    week_number INTEGER NOT NULL,
+    pdf_base64 TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(client_id, week_start),
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_planning_weeks_client_id ON planning_weeks(client_id);
+CREATE INDEX IF NOT EXISTS idx_planning_archives_client_id ON planning_archives(client_id);
+
+-- Tables de paramètres additionnelles
+CREATE TABLE IF NOT EXISTS client_settings (
+    client_id TEXT PRIMARY KEY,
+    company_name TEXT,
+    phone TEXT,
+    email TEXT,
+    address TEXT,
+    postal_code TEXT,
+    city TEXT,
+    country TEXT,
+    siret TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS crm_settings (
+    client_id TEXT PRIMARY KEY,
+    custom_fields TEXT DEFAULT '[]',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS rh_settings (
+    client_id TEXT PRIMARY KEY,
+    rules TEXT DEFAULT '{}',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+);

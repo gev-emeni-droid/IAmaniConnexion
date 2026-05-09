@@ -1,7 +1,6 @@
 import React from 'react';
 import { ArrowLeft, Download, Eye, History, Trash2 } from 'lucide-react';
 import { moduleApi } from '../../lib/api';
-import { getFactureHistory } from '../../lib/factureHistoryApi';
 import { useAuth } from '../../context/AuthContext';
 
 interface InvoiceHistoryProps {
@@ -20,27 +19,6 @@ export const InvoiceHistory = ({ refreshKey = 0, onBack, onOpenInvoice, onDownlo
     const [items, setItems] = React.useState<any[]>([]);
     const [loading, setLoading] = React.useState(true);
     const [deletingId, setDeletingId] = React.useState<string | null>(null);
-    // Pour l'historique d'envoi
-    const [history, setHistory] = React.useState<any[]>([]);
-    const [historyLoading, setHistoryLoading] = React.useState(false);
-    const [historyFor, setHistoryFor] = React.useState<string | null>(null);
-    const [resendLoading, setResendLoading] = React.useState<string | null>(null);
-    const [customEmail, setCustomEmail] = React.useState('');
-    const [customSendLoading, setCustomSendLoading] = React.useState(false);
-    const [customSendError, setCustomSendError] = React.useState('');
-    // Fonction pour renvoyer la facture à une adresse donnée
-    const resendInvoice = async (factureId: string, email: string) => {
-        if (!email) return;
-        setResendLoading(email);
-        try {
-            await moduleApi.sendFactureEmail(factureId, { to: email });
-            alert('Facture renvoyée à ' + email);
-        } catch (e: any) {
-            alert('Erreur lors de l’envoi : ' + (e?.message || 'Erreur inconnue'));
-        } finally {
-            setResendLoading(null);
-        }
-    };
 
     const isSuperAdminSession = Boolean(
         (user?.type === 'admin' && user?.email?.toLowerCase() === 'gev-emeni@outlook.fr') ||
@@ -51,19 +29,7 @@ export const InvoiceHistory = ({ refreshKey = 0, onBack, onOpenInvoice, onDownlo
         setLoading(true);
         try {
             const data = await moduleApi.getFactures();
-            // Pour chaque facture, on récupère l'historique d'envoi si last_sent_email est vide
-            const itemsWithHistory = await Promise.all((Array.isArray(data) ? data : []).map(async (item: any) => {
-                if (!item.last_sent_email) {
-                    try {
-                        const hist = await getFactureHistory(item.id);
-                        return { ...item, facture_history: Array.isArray(hist) ? hist : [] };
-                    } catch {
-                        return { ...item, facture_history: [] };
-                    }
-                }
-                return item;
-            }));
-            setItems(itemsWithHistory);
+            setItems(Array.isArray(data) ? data : []);
         } catch (e) {
             console.error(e);
             setItems([]);
@@ -72,19 +38,6 @@ export const InvoiceHistory = ({ refreshKey = 0, onBack, onOpenInvoice, onDownlo
         }
     }, []);
 
-    // Afficher l'historique d'envoi pour une facture
-    const showHistory = async (factureId: string) => {
-        setHistoryLoading(true);
-        setHistoryFor(factureId);
-        try {
-            const data = await getFactureHistory(factureId);
-            setHistory(Array.isArray(data) ? data : []);
-        } catch {
-            setHistory([]);
-        } finally {
-            setHistoryLoading(false);
-        }
-    };
 
     React.useEffect(() => {
         load();
@@ -168,13 +121,6 @@ export const InvoiceHistory = ({ refreshKey = 0, onBack, onOpenInvoice, onDownlo
                                             >
                                                 <Download size={13} /> Télécharger
                                             </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => showHistory(item.id)}
-                                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-[var(--border-color)] text-xs font-bold text-[var(--text-primary)] hover:bg-[var(--bg-soft)]"
-                                            >
-                                                <History size={13} /> Historique envois
-                                            </button>
                                             {isSuperAdminSession && (
                                                 <button
                                                     type="button"
@@ -193,81 +139,6 @@ export const InvoiceHistory = ({ refreshKey = 0, onBack, onOpenInvoice, onDownlo
                     </table>
                 </div>
             </div>
-            {/* Affichage de l'historique d'envoi */}
-            {historyFor && (
-                <div className="mt-4 p-4 border rounded-lg bg-[var(--bg-soft)]">
-                    <div className="font-bold mb-2">Historique des envois pour la facture {historyFor}</div>
-                    {historyLoading ? (
-                        <div>Chargement...</div>
-                    ) : history.length === 0 ? (
-                        <div>Aucun envoi enregistré.</div>
-                    ) : (
-                        <table className="w-full text-left">
-                            <thead>
-                                <tr>
-                                    <th>Date</th>
-                                    <th>Action</th>
-                                    <th>Email</th>
-                                    <th>PDF</th>
-                                    <th>Renvoyer</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {history.map((h) => (
-                                    <tr key={h.id}>
-                                        <td>{new Date(h.created_at).toLocaleString()}</td>
-                                        <td>{h.action}</td>
-                                        <td>{h.email || '-'}</td>
-                                        <td>{h.pdf_filename || '-'}</td>
-                                        <td>
-                                            {h.email && (
-                                                <button
-                                                    className="px-2 py-1 text-xs rounded bg-[#2f9e9e] text-white hover:opacity-90 disabled:opacity-60"
-                                                    disabled={resendLoading === h.email}
-                                                    onClick={() => resendInvoice(historyFor, h.email)}
-                                                >
-                                                    {resendLoading === h.email ? 'Envoi...' : 'Renvoyer'}
-                                                </button>
-                                            )}
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    )}
-                    {/* Champ pour saisir une nouvelle adresse */}
-                    <div className="mt-4 flex items-center gap-2">
-                        <input
-                            type="email"
-                            placeholder="Nouvelle adresse email..."
-                            value={customEmail}
-                            onChange={e => setCustomEmail(e.target.value)}
-                            className="px-2 py-1 border rounded text-sm"
-                            style={{ minWidth: 220 }}
-                        />
-                        <button
-                            className="px-3 py-1 text-xs rounded bg-[#2f9e9e] text-white hover:opacity-90 disabled:opacity-60"
-                            disabled={customSendLoading || !customEmail}
-                            onClick={async () => {
-                                setCustomSendLoading(true);
-                                setCustomSendError('');
-                                try {
-                                    await resendInvoice(historyFor, customEmail);
-                                    setCustomEmail('');
-                                } catch (e: any) {
-                                    setCustomSendError(e?.message || 'Erreur inconnue');
-                                } finally {
-                                    setCustomSendLoading(false);
-                                }
-                            }}
-                        >
-                            {customSendLoading ? 'Envoi...' : 'Envoyer à une autre adresse'}
-                        </button>
-                        {customSendError && <span className="text-xs text-red-500 ml-2">{customSendError}</span>}
-                    </div>
-                    <button onClick={() => setHistoryFor(null)} className="mt-2 text-xs underline">Fermer</button>
-                </div>
-            )}
         </div>
     );
 };

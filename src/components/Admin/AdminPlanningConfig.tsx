@@ -10,7 +10,7 @@ interface Props {
 }
 
 export const AdminPlanningConfig = ({ clientId, clientName, onBack }: Props) => {
-    const [absenceCodes, setAbsenceCodes] = useState<string[]>([]);
+    const [absenceCodes, setAbsenceCodes] = useState<{ code: string; isFullDay: boolean; autoApply: boolean; color?: string }[]>([]);
     const [extraTypes, setExtraTypes] = useState<string[]>([]);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -18,6 +18,7 @@ export const AdminPlanningConfig = ({ clientId, clientName, onBack }: Props) => 
     const [success, setSuccess] = useState(false);
 
     const [newAbsenceCode, setNewAbsenceCode] = useState('');
+    const [newAbsenceColor, setNewAbsenceColor] = useState('#ffe39b');
     const [newExtraType, setNewExtraType] = useState('');
 
     useEffect(() => {
@@ -29,7 +30,22 @@ export const AdminPlanningConfig = ({ clientId, clientName, onBack }: Props) => 
         setError(null);
         try {
             const data = await adminApi.getClientPlanningConfig(clientId);
-            setAbsenceCodes(data.absenceCodes || []);
+            const rawAbsences = Array.isArray(data.absenceCodes) ? data.absenceCodes : [];
+            setAbsenceCodes(rawAbsences.map((v: any) => {
+                if (typeof v === 'string') return { code: v, isFullDay: true, autoApply: true };
+                // Extra safe extraction
+                let codeStr = 'ABS';
+                if (v && v.code) {
+                    if (typeof v.code === 'object') codeStr = String(v.code.code || v.code.label || 'ABS');
+                    else codeStr = String(v.code);
+                }
+                return { 
+                    code: codeStr, 
+                    isFullDay: !!v?.isFullDay,
+                    autoApply: v.autoApply ?? !!v?.isFullDay,
+                    color: v.color || '#ffe39b'
+                };
+            }));
             setExtraTypes(data.extraTypes || []);
         } catch (e) {
             console.error('Failed to load planning config:', e);
@@ -37,6 +53,26 @@ export const AdminPlanningConfig = ({ clientId, clientName, onBack }: Props) => 
         } finally {
             setLoading(false);
         }
+    };
+
+    const getDynamicStyles = (hexColor: string) => {
+        const hex = (hexColor || '#ffe39b').toUpperCase().replace('#', '');
+        const r = parseInt(hex.slice(0, 2), 16) || 0;
+        const g = parseInt(hex.slice(2, 4), 16) || 0;
+        const b = parseInt(hex.slice(4, 6), 16) || 0;
+
+        if (hex === '000000') return { bg: hexColor, text: '#FFFFFF' };
+        if (hex === 'FFFFFF') return { bg: hexColor, text: '#000000' };
+
+        const textR = Math.max(0, Math.floor(r * 0.35));
+        const textG = Math.max(0, Math.floor(g * 0.35));
+        const textB = Math.max(0, Math.floor(b * 0.35));
+
+        const toHex = (c: number) => c.toString(16).padStart(2, '0');
+        return { 
+            bg: hexColor, 
+            text: `#${toHex(textR)}${toHex(textG)}${toHex(textB)}` 
+        };
     };
 
     const handleSave = async () => {
@@ -49,10 +85,12 @@ export const AdminPlanningConfig = ({ clientId, clientName, onBack }: Props) => 
                 extraTypes
             });
             setSuccess(true);
+            // Re-charger les données depuis la base pour confirmer la persistance
+            await loadConfig();
             setTimeout(() => setSuccess(false), 3000);
-        } catch (e) {
+        } catch (e: any) {
             console.error('Failed to save planning config:', e);
-            setError('Erreur lors de l\'enregistrement.');
+            setError(e?.message || 'Erreur lors de l\'enregistrement.');
         } finally {
             setSaving(false);
         }
@@ -62,16 +100,32 @@ export const AdminPlanningConfig = ({ clientId, clientName, onBack }: Props) => 
         e.preventDefault();
         const code = newAbsenceCode.trim().toUpperCase();
         if (!code) return;
-        if (absenceCodes.includes(code)) {
+        if (code === 'REPOS') {
+            setError('Le code REPOS est réservé et immuable.');
+            return;
+        }
+        if (absenceCodes.some(a => a.code === code)) {
             setError('Ce code existe déjà.');
             return;
         }
-        setAbsenceCodes([...absenceCodes, code]);
+        setAbsenceCodes([...absenceCodes, { code, isFullDay: true, autoApply: true, color: newAbsenceColor }]);
         setNewAbsenceCode('');
     };
 
     const removeAbsenceCode = (code: string) => {
-        setAbsenceCodes(absenceCodes.filter(c => c !== code));
+        setAbsenceCodes(absenceCodes.filter(c => c.code !== code));
+    };
+
+    const toggleAbsenceFullDay = (code: string) => {
+        setAbsenceCodes(prev => prev.map(a => a.code === code ? { ...a, isFullDay: !a.isFullDay } : a));
+    };
+
+    const toggleAbsenceAutoApply = (code: string) => {
+        setAbsenceCodes(prev => prev.map(a => a.code === code ? { ...a, autoApply: !a.autoApply } : a));
+    };
+
+    const updateAbsenceColor = (code: string, color: string) => {
+        setAbsenceCodes(prev => prev.map(a => a.code === code ? { ...a, color } : a));
     };
 
     const addExtraType = (e: React.FormEvent) => {
@@ -171,6 +225,13 @@ export const AdminPlanningConfig = ({ clientId, clientName, onBack }: Props) => 
 
                     <form onSubmit={addAbsenceCode} className="flex gap-3">
                         <input 
+                            type="color" 
+                            value={newAbsenceColor}
+                            onChange={(e) => setNewAbsenceColor(e.target.value)}
+                            className="w-14 h-12 bg-black/40 border border-white/10 rounded-2xl p-1 cursor-pointer outline-none focus:border-orange-500/50 transition-all"
+                            title="Choisir la couleur de fond"
+                        />
+                        <input 
                             type="text" 
                             value={newAbsenceCode}
                             onChange={(e) => setNewAbsenceCode(e.target.value)}
@@ -184,24 +245,57 @@ export const AdminPlanningConfig = ({ clientId, clientName, onBack }: Props) => 
 
                     <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
                         <AnimatePresence mode="popLayout">
-                            {absenceCodes.map(code => (
-                                <motion.div 
-                                    key={code}
-                                    layout
-                                    initial={{ opacity: 0, scale: 0.9 }}
-                                    animate={{ opacity: 1, scale: 1 }}
-                                    exit={{ opacity: 0, scale: 0.9 }}
-                                    className="flex items-center justify-between p-4 bg-white/[0.02] hover:bg-white/[0.05] rounded-2xl border border-white/5 group transition-all"
-                                >
-                                    <span className="font-bold text-white tracking-widest">{code}</span>
-                                    <button 
-                                        onClick={() => removeAbsenceCode(code)}
-                                        className="p-2 text-gray-500 hover:text-red-400 hover:bg-red-400/10 rounded-xl transition-all opacity-0 group-hover:opacity-100"
+                            {absenceCodes.filter(a => a.code !== 'REPOS').map(item => {
+                                const styles = getDynamicStyles(item.color || '#ffe39b');
+                                return (
+                                    <motion.div 
+                                        key={item.code}
+                                        layout
+                                        initial={{ opacity: 0, scale: 0.9 }}
+                                        animate={{ opacity: 1, scale: 1 }}
+                                        exit={{ opacity: 0, scale: 0.9 }}
+                                        className="flex items-center justify-between p-4 bg-white/[0.02] hover:bg-white/[0.05] rounded-2xl border border-white/5 group transition-all"
                                     >
-                                        <Trash2 size={16} />
-                                    </button>
-                                </motion.div>
-                            ))}
+                                        <div className="flex items-center gap-3">
+                                            <div 
+                                                className="w-12 py-1.5 rounded-lg flex items-center justify-center font-black tracking-widest text-xs shadow-sm"
+                                                style={{ backgroundColor: styles.bg, color: styles.text }}
+                                            >
+                                                {String(item.code)}
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <button 
+                                                    onClick={() => toggleAbsenceFullDay(item.code)}
+                                                    className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${item.isFullDay ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/20' : 'bg-white/5 text-gray-500 border border-white/5'}`}
+                                                    title="Fusionne les segments en une seule ligne d'absence"
+                                                >
+                                                    Journée
+                                                </button>
+                                                <button 
+                                                    onClick={() => toggleAbsenceAutoApply(item.code)}
+                                                    className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${item.autoApply ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' : 'bg-white/5 text-gray-500 border border-white/5'}`}
+                                                    title="S'applique automatiquement à tous les segments du jour"
+                                                >
+                                                    Auto
+                                                </button>
+                                                <input 
+                                                    type="color" 
+                                                    value={item.color || '#ffe39b'}
+                                                    onChange={(e) => updateAbsenceColor(item.code, e.target.value)}
+                                                    className="w-6 h-6 rounded bg-transparent border-none cursor-pointer"
+                                                    title="Modifier la couleur"
+                                                />
+                                            </div>
+                                        </div>
+                                        <button 
+                                            onClick={() => removeAbsenceCode(item.code)}
+                                            className="p-2 text-gray-500 hover:text-red-400 hover:bg-red-400/10 rounded-xl transition-all opacity-0 group-hover:opacity-100"
+                                        >
+                                            <Trash2 size={16} />
+                                        </button>
+                                    </motion.div>
+                                );
+                            })}
                         </AnimatePresence>
                         {absenceCodes.length === 0 && (
                             <div className="text-center py-10 border-2 border-dashed border-white/5 rounded-3xl">

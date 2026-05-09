@@ -41,6 +41,8 @@ export const PostesEmployesModule = () => {
     const [jobPosts, setJobPosts] = useState<JobPost[]>([]);
     const [employees, setEmployees] = useState<Employee[]>([]);
 
+    const [showPostModal, setShowPostModal] = useState(false);
+    const [editingPost, setEditingPost] = useState<any>(null);
     const [newPostTitle, setNewPostTitle] = useState('');
     const [showEmployeeModal, setShowEmployeeModal] = useState(false);
     const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
@@ -85,13 +87,20 @@ export const PostesEmployesModule = () => {
 
     const filteredEmployees = useMemo(() => {
         const term = employeeSearch.trim().toLowerCase();
-        if (!term) return employees;
-        return employees.filter((employee) => {
-            const fullName = `${employee.first_name || ''} ${employee.last_name || ''}`.toLowerCase();
-            const email = String(employee.email || '').toLowerCase();
-            const phone = String(employee.phone || '').toLowerCase();
-            const post = String(employee.job_post_title || '').toLowerCase();
-            return fullName.includes(term) || email.includes(term) || phone.includes(term) || post.includes(term);
+        let result = employees;
+        if (term) {
+            result = employees.filter((employee) => {
+                const fullName = `${employee.first_name || ''} ${employee.last_name || ''}`.toLowerCase();
+                const email = String(employee.email || '').toLowerCase();
+                const phone = String(employee.phone || '').toLowerCase();
+                const post = String(employee.job_post_title || '').toLowerCase();
+                return fullName.includes(term) || email.includes(term) || phone.includes(term) || post.includes(term);
+            });
+        }
+        return [...result].sort((a, b) => {
+            const nameA = `${a.last_name || ''} ${a.first_name || ''}`.trim().toUpperCase();
+            const nameB = `${b.last_name || ''} ${b.first_name || ''}`.trim().toUpperCase();
+            return nameA.localeCompare(nameB, 'fr', { sensitivity: 'base' });
         });
     }, [employees, employeeSearch]);
 
@@ -122,14 +131,30 @@ export const PostesEmployesModule = () => {
         setShowEmployeeModal(true);
     };
 
+    const openPostModal = (post: any = null) => {
+        setEditingPost(post);
+        setNewPostTitle(post ? post.title : '');
+        setError('');
+        setShowPostModal(true);
+    };
+
     const addPost = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!newPostTitle.trim()) return;
         try {
-            await moduleApi.createJobPost({ title: newPostTitle.trim() });
+            if (editingPost) {
+                // Si une API de mise à jour existe, sinon on supprime/recrée ou on laisse tomber pour l'instant
+                // Pour l'instant, l'utilisateur a demandé d'AJOUTER.
+                // On va se concentrer sur l'ajout.
+            } else {
+                await moduleApi.createJobPost({ title: newPostTitle.trim() });
+            }
             setNewPostTitle('');
+            setShowPostModal(false);
+            setEditingPost(null);
             await loadData();
         } catch (err: any) {
+            console.error('Failed to create job post:', err);
             setError(err?.message || 'Impossible de créer le poste.');
         }
     };
@@ -222,6 +247,22 @@ export const PostesEmployesModule = () => {
                     <h1 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-white">Postes & Employés</h1>
                     <p className="text-slate-600 dark:text-gray-400 mt-1">Gestion RH complète: postes, profils collaborateurs et documents.</p>
                 </div>
+                {activeTab === 'posts' && (
+                    <button 
+                        onClick={() => openPostModal()}
+                        className="px-5 py-2.5 rounded-xl bg-black text-white dark:bg-white dark:text-black font-bold hover:opacity-90 inline-flex items-center gap-2 transition-all shadow-lg"
+                    >
+                        <Plus size={18} /> Ajouter un poste
+                    </button>
+                )}
+                {activeTab === 'employees' && (
+                    <button 
+                        onClick={() => openEmployeeModal()}
+                        className="px-5 py-2.5 rounded-xl bg-black text-white dark:bg-white dark:text-black font-bold hover:opacity-90 inline-flex items-center gap-2 transition-all shadow-lg"
+                    >
+                        <Plus size={18} /> Ajouter un employé
+                    </button>
+                )}
             </header>
 
             <div className="bg-white dark:bg-[#0A0A0A] border border-gray-200 dark:border-white/10 rounded-2xl p-2 inline-flex gap-2 transition-colors duration-200">
@@ -237,19 +278,7 @@ export const PostesEmployesModule = () => {
 
             {activeTab === 'posts' && (
                 <section className="space-y-6">
-                    <div className="bg-white dark:bg-[#0A0A0A] border border-gray-200 dark:border-white/10 rounded-2xl p-6 transition-colors duration-200">
-                        <form onSubmit={addPost} className="flex gap-3">
-                            <input
-                                value={newPostTitle}
-                                onChange={(e) => setNewPostTitle(e.target.value)}
-                                placeholder="Intitulé du poste (ex: Hôtesse, Commercial...)"
-                                className="flex-1 bg-slate-50 dark:bg-black border border-gray-200 dark:border-white/10 rounded-xl px-4 py-3 text-slate-900 dark:text-white outline-none focus:border-slate-400 dark:focus:border-white transition-colors duration-200"
-                            />
-                            <button className="px-5 py-3 rounded-xl bg-black text-white dark:bg-white dark:text-black font-bold hover:opacity-90 inline-flex items-center gap-2 transition-colors duration-200">
-                                <Plus size={16} /> Ajouter
-                            </button>
-                        </form>
-                    </div>
+                    {/* Le formulaire est maintenant dans une modale pour plus de clarté */}
 
                     <div className="bg-white dark:bg-[#0A0A0A] border border-gray-200 dark:border-white/10 rounded-2xl overflow-hidden transition-colors duration-200">
                         <table className="w-full text-left">
@@ -322,8 +351,9 @@ export const PostesEmployesModule = () => {
                                 {filteredEmployees.map((employee) => (
                                     <tr key={employee.id} className="hover:bg-slate-50 dark:hover:bg-white/5 transition-colors duration-200">
                                         <td className="px-6 py-4">
-                                            <p className="text-slate-900 dark:text-white font-medium">{employee.first_name} {employee.last_name}</p>
-                                            <p className="text-xs text-slate-500 dark:text-gray-500">ID {employee.id}</p>
+                                            <p className="text-slate-900 dark:text-white font-medium">
+                                                {(employee.last_name || '').toUpperCase()} {employee.first_name || ''}
+                                            </p>
                                         </td>
                                         <td className="px-6 py-4 text-slate-800 dark:text-gray-300">{employee.job_post_title || '-'}</td>
                                         <td className="px-6 py-4 text-slate-700 dark:text-gray-400 text-sm">
@@ -348,6 +378,57 @@ export const PostesEmployesModule = () => {
                     </div>
                 </section>
             )}
+
+            {/* Modal Poste */}
+            <AnimatePresence>
+                {showPostModal && (
+                    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                            className="bg-white dark:bg-[#0A0A0A] border border-gray-200 dark:border-white/10 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden"
+                        >
+                            <div className="px-6 py-4 border-b border-gray-100 dark:border-white/5 flex items-center justify-between">
+                                <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+                                    {editingPost ? 'Modifier le poste' : 'Ajouter un nouveau poste'}
+                                </h3>
+                                <button onClick={() => setShowPostModal(false)} className="text-gray-500 hover:text-gray-700 dark:hover:text-white transition-colors">
+                                    <X size={20} />
+                                </button>
+                            </div>
+                            <form onSubmit={addPost} className="p-6 space-y-4">
+                                <div className="space-y-2">
+                                    <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Intitulé du poste</label>
+                                    <input
+                                        autoFocus
+                                        value={newPostTitle}
+                                        onChange={(e) => setNewPostTitle(e.target.value)}
+                                        placeholder="ex: Barman, Manager, Hôtesse..."
+                                        className="w-full bg-slate-50 dark:bg-black border border-gray-200 dark:border-white/10 rounded-xl px-4 py-3 text-slate-900 dark:text-white outline-none focus:border-slate-400 dark:focus:border-white transition-colors duration-200"
+                                    />
+                                </div>
+                                <div className="flex gap-3 pt-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowPostModal(false)}
+                                        className="flex-1 px-4 py-3 rounded-xl border border-gray-200 dark:border-white/10 text-slate-700 dark:text-gray-400 font-bold hover:bg-gray-50 dark:hover:bg-white/5 transition-colors"
+                                    >
+                                        Annuler
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        disabled={!newPostTitle.trim()}
+                                        className="flex-1 px-4 py-3 rounded-xl bg-black text-white dark:bg-white dark:text-black font-bold hover:opacity-90 disabled:opacity-50 transition-colors"
+                                    >
+                                        {editingPost ? 'Mettre à jour' : 'Confirmer l\'ajout'}
+                                    </button>
+                                </div>
+                            </form>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
 
             <AnimatePresence>
                 {showEmployeeModal && (

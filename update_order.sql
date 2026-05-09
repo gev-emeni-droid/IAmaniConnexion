@@ -1,0 +1,1 @@
+UPDATE planning_settings SET payload_json = json_set(payload_json, '$.rolesOrder', json('["c7cf2d36","66813213","7e08e219","ab5d02d1","9cdc151d","ac4995b0","ffff996d","5e37f4a8","c0c35e06","607593c6"]')) WHERE client_id = 'c7317f37';

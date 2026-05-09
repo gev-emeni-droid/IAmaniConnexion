@@ -56,7 +56,7 @@ export const CRMModule = () => {
         setLoading(true);
         try {
             const data = await moduleApi.getCRMContacts();
-            setContacts(data);
+            setContacts(data || []);
         } catch (e) {
             console.error(e);
         } finally {
@@ -144,7 +144,17 @@ export const CRMModule = () => {
         `${c.first_name ?? ''} ${c.last_name ?? ''} ${c.company_name ?? ''} ${c.phone ?? ''} ${c.address ?? ''} ${c.postal_code ?? ''} ${c.city ?? ''}`
             .toLowerCase()
             .includes(search.toLowerCase())
-    );
+    ).sort((a, b) => {
+        if (activeTab === 'PROFESSIONNEL') {
+            const nameA = (a.company_name || a.organizer_name || '').toUpperCase();
+            const nameB = (b.company_name || b.organizer_name || '').toUpperCase();
+            return nameA.localeCompare(nameB, 'fr');
+        } else {
+            const nameA = `${a.last_name || ''} ${a.first_name || ''}`.trim().toUpperCase();
+            const nameB = `${b.last_name || ''} ${b.first_name || ''}`.trim().toUpperCase();
+            return nameA.localeCompare(nameB, 'fr');
+        }
+    });
 
     if (selectedContact) {
         return (
@@ -333,7 +343,7 @@ export const CRMModule = () => {
                                 <User size={48} className="text-slate-700 dark:text-white" />
                             </div>
                             <h2 className="text-2xl font-bold text-slate-900 dark:text-white">
-                                {selectedContact.type === 'PRIVÉ' ? `${selectedContact.first_name} ${selectedContact.last_name}` : selectedContact.company_name}
+                                {selectedContact.type === 'PRIVÉ' ? `${(selectedContact.last_name || '').toUpperCase()} ${selectedContact.first_name || ''}`.trim() : selectedContact.company_name}
                             </h2>
                             <p className="text-blue-400 text-xs font-bold uppercase tracking-widest mt-2">{selectedContact.type}</p>
                             
@@ -372,7 +382,7 @@ export const CRMModule = () => {
                                 <FileText className="text-slate-900 dark:text-white" size={22} />
                                 <h3 className="text-xl font-bold text-slate-900 dark:text-white">Factures liées</h3>
                             </div>
-                            {selectedContact.factures?.length > 0 ? selectedContact.factures.map((facture: any) => (
+                            {selectedContact?.factures?.length > 0 ? selectedContact.factures.map((facture: any) => (
                                 <div key={facture.id} className="bg-white dark:bg-[#111111] rounded-2xl border border-gray-200 dark:border-white/10 p-4 flex items-center justify-between transition-all">
                                     <div>
                                         <p className="text-slate-900 dark:text-white font-bold">{facture.invoice_number || 'Facture'}</p>
@@ -535,7 +545,7 @@ export const CRMModule = () => {
                                         </div>
                                         <div className="flex-1 min-w-0">
                                             <h3 className="text-lg font-bold text-slate-900 dark:text-white truncate">
-                                                {`${contact.first_name ?? ''} ${contact.last_name ?? ''}`.trim() || '—'}
+                                                {`${(contact.last_name || '').toUpperCase()} ${contact.first_name || ''}`.trim() || '—'}
                                             </h3>
                                             <p className="text-xs text-slate-500 dark:text-gray-500 uppercase tracking-widest font-bold">Particulier</p>
                                         </div>

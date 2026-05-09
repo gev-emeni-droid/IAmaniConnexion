@@ -331,7 +331,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_email_unique ON clients(email);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_username_unique ON clients(username) WHERE username IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_collaborators_client ON collaborators(client_id);
 CREATE INDEX IF NOT EXISTS idx_facture_client ON facture(client_id);
-CREATE INDEX IF NOT EXISTS idx_crm_contacts_client ON crm_contacts(client_id);
+CREATE INDEX IF NOT EXISTS idx_crm_contacts_client_phone ON crm_contacts(client_id, phone);
 CREATE INDEX IF NOT EXISTS idx_evenementiel_client ON evenementiel(client_id);
 CREATE INDEX IF NOT EXISTS idx_employes_client ON employes(client_id);
 

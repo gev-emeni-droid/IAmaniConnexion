@@ -1,12 +1,19 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckSquare, Download, FileText, LayoutPanelLeft, X } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, addDays } from 'date-fns';
 import { fr } from 'date-fns/locale';
 
 import { Planning, PlanningRow, Shift } from './types';
+import { useAuth } from '../../context/AuthContext';
+import { planningApi } from '../../lib/api';
 
-const HEADER_BG_COLORS = ['#4da8ad', '#a8dadc', '#253b6e', '#f2c6de', '#c48197', '#241416', '#dbc5a1', '#a7ab84', '#ffffff', '#b7d09c', '#7dc8bf', '#64acd8'];
-const HEADER_TEXT_COLORS = ['#000000', '#ffffff', '#253b6e', '#241416'];
+
+const HEADER_BG_COLORS = [
+    '#C1D5AF', '#4AA3A2', '#A7E0E0', '#212E53', '#F4CFDF', 
+    '#C08493', '#1C0F12', '#D4C2A1', '#A1A27E', '#FFFFFF', 
+    '#88C7BC', '#5FACD3', '#000000'
+];
+const HEADER_TEXT_COLORS = ['#000000', '#FFFFFF', '#212E53', '#1C0F12'];
 
 type ExportMode = 'week' | 'day';
 
@@ -19,20 +26,10 @@ interface PlanningExportModalProps {
     currentWeekStart: Date;
     weekDates: string[];
     selectedDayIndex: number;
+    employees?: any[];
 }
 
 const normalizeRoleKey = (value: string) => String(value || '').trim().toLowerCase();
-
-const getShiftSlots = (shift?: Shift) => {
-    const horaires = (shift?.segments || []).filter((segment) => segment.type === 'horaire' && segment.start && segment.end);
-    if (horaires.length === 0) return null;
-    return {
-        arrival: String(horaires[0].start || ''),
-        departure: String(horaires[horaires.length - 1].end || ''),
-    };
-};
-
-const hasWorkingShift = (shift?: Shift) => Boolean(getShiftSlots(shift));
 
 export const PlanningExportModal: React.FC<PlanningExportModalProps> = ({
     isOpen,
@@ -43,12 +40,15 @@ export const PlanningExportModal: React.FC<PlanningExportModalProps> = ({
     currentWeekStart,
     weekDates,
     selectedDayIndex,
+    employees = []
 }) => {
+    const { user } = useAuth();
     const [exportMode, setExportMode] = useState<ExportMode>('week');
-    const [weekViewType, setWeekViewType] = useState<'grid' | 'details'>('grid');
+
+    const [weekViewType, setWeekViewType] = useState<'grid' | 'details'>('details');
     const [dayDate, setDayDate] = useState('');
-    const [headerBgColor, setHeaderBgColor] = useState(HEADER_BG_COLORS[9]);
-    const [headerTextColor, setHeaderTextColor] = useState(HEADER_TEXT_COLORS[0]);
+    const [headerBgColor, setHeaderBgColor] = useState(HEADER_BG_COLORS[0]); // #C1D5AF
+    const [headerTextColor, setHeaderTextColor] = useState(HEADER_TEXT_COLORS[0]); // #000000
     const [includeArrival, setIncludeArrival] = useState(true);
     const [includeDeparture, setIncludeDeparture] = useState(true);
     const [includeSignature, setIncludeSignature] = useState(true);
@@ -83,31 +83,43 @@ export const PlanningExportModal: React.FC<PlanningExportModalProps> = ({
 
         const selectedRoleKeys = new Set(selectedRoles.map(normalizeRoleKey));
 
-        // MODE GRILLE (Hebdomadaire)
-        if (exportMode === 'week' && weekViewType === 'grid') {
-            const rows = planning.rows
-                .filter((row) => {
-                    const role = orderedRoles.find((item) => item.id === row.employeeRole || item.label === row.employeeRole);
-                    const roleKey = normalizeRoleKey(role?.id || row.employeeRole);
-                    return selectedRoleKeys.has(roleKey);
-                })
-                .map((row) => {
-                    const role = orderedRoles.find((item) => item.id === row.employeeRole || item.label === row.employeeRole);
-                    return {
-                        ...row,
-                        roleLabel: role?.label || row.employeeRole,
-                    };
-                })
-                .sort((a, b) => {
-                    const roleIndexA = orderedRoles.findIndex((role) => role.label === a.roleLabel || role.id === a.employeeRole);
-                    const roleIndexB = orderedRoles.findIndex((role) => role.label === b.roleLabel || role.id === b.employeeRole);
-                    if (roleIndexA !== roleIndexB) return roleIndexA - roleIndexB;
-                    return a.employeeName.localeCompare(b.employeeName);
-                });
+        const allRows: any[] = [];
+        const roleMap = new Map<string, { id: string; label: string }>();
+        orderedRoles.forEach(r => roleMap.set(normalizeRoleKey(r.id), r));
 
-            // Group by roles for grid view headers
-            const groupedByRole: Record<string, typeof rows> = {};
-            rows.forEach(r => {
+        employees.forEach(emp => {
+            const roleKey = normalizeRoleKey(emp.position || 'GENERAL');
+            if (selectedRoleKeys.has(roleKey)) {
+                const role = roleMap.get(roleKey);
+                const existingPlanningRow = planning.rows.find(r => r.employeeId === emp.id);
+                
+                allRows.push({
+                    employeeId: emp.id,
+                    firstName: emp.first_name || '',
+                    lastName: emp.last_name || '',
+                    employeeName: `${(emp.last_name || '').toUpperCase()} ${emp.first_name || ''}`.trim(),
+                    employeeRole: emp.position || 'GENERAL',
+                    roleLabel: role?.label || emp.position || 'GENERAL',
+                    shifts: existingPlanningRow?.shifts || {},
+                    isExtra: existingPlanningRow?.isExtra || false
+                });
+            }
+        });
+
+        allRows.sort((a, b) => {
+            const roleIndexA = orderedRoles.findIndex((role) => role.id === a.employeeRole || role.label === a.employeeRole);
+            const roleIndexB = orderedRoles.findIndex((role) => role.id === b.employeeRole || role.label === b.employeeRole);
+            if (roleIndexA !== roleIndexB) return roleIndexA - roleIndexB;
+            
+            // Sort by LAST NAME primarily
+            const nameSort = (a.lastName || '').localeCompare(b.lastName || '', 'fr', { sensitivity: 'base' });
+            if (nameSort !== 0) return nameSort;
+            return (a.firstName || '').localeCompare(b.firstName || '', 'fr', { sensitivity: 'base' });
+        });
+
+        if (exportMode === 'week' && weekViewType === 'grid') {
+            const groupedByRole: Record<string, any[]> = {};
+            allRows.forEach(r => {
                 if (!groupedByRole[r.roleLabel]) groupedByRole[r.roleLabel] = [];
                 groupedByRole[r.roleLabel].push(r);
             });
@@ -119,144 +131,557 @@ export const PlanningExportModal: React.FC<PlanningExportModalProps> = ({
             }];
         }
 
-        // MODE DETAILS (Un jour par page)
         const dates = exportMode === 'day' ? (dayDate ? [dayDate] : []) : weekDates;
-        return dates.map((date) => {
-            const rows = planning.rows
-                .filter((row) => {
-                    const role = orderedRoles.find((item) => item.id === row.employeeRole || item.label === row.employeeRole);
-                    const roleKey = normalizeRoleKey(role?.id || row.employeeRole);
-                    return selectedRoleKeys.has(roleKey) && hasWorkingShift(row.shifts[date]);
-                })
-                .map((row) => {
-                    const role = orderedRoles.find((item) => item.id === row.employeeRole || item.label === row.employeeRole);
-                    const slot = getShiftSlots(row.shifts[date]);
+        
+        if (exportMode === 'day') {
+            const date = dayDate || weekDates[0];
+            if (!date) return [];
+
+            const services: ('midi' | 'soir')[] = ['midi', 'soir'];
+            return services.map(service => {
+                const detailRows = allRows.map(row => {
                     const shift = row.shifts[date];
-                    
-                    // Format special pour split shifts ou codes
                     let displayTime = '';
-                    if (shift?.type === 'travail') {
-                        const h = (shift.segments || []).filter(s => s.type === 'horaire' && s.start && s.end);
-                        displayTime = h.map(s => `${s.start}-${s.end}`).join(' / ');
-                    } else if (shift?.segments?.[0]?.label) {
-                        displayTime = shift.segments[0].label;
+                    let isRepos = false;
+                    let isAbsence = false;
+                    let absenceCodes: string[] = [];
+
+                    if (shift) {
+                        // Check if the shift belongs to this service
+                        const matchesService = (service === 'midi' && (shift.serviceType === 'midi' || shift.serviceType === 'midi+soir')) ||
+                                               (service === 'soir' && (shift.serviceType === 'soir' || shift.serviceType === 'midi+soir'));
+                        
+                        if (matchesService) {
+                            const h = (shift.segments || []).filter((s: any) => s.type === 'horaire' && s.start && s.end);
+                            if (h.length > 0) {
+                                displayTime = h.map((s: any) => `${s.start}-${s.end}`).join(' / ');
+                            }
+                        }
+
+                        const codes = (shift.segments || []).filter((s: any) => s.label && s.label !== 'REPOS');
+                        if (codes.length > 0) {
+                            absenceCodes = codes.map((s: any) => s.label);
+                            isAbsence = true;
+                        }
+
+                        if (shift.type === 'repos') {
+                            isRepos = true;
+                            displayTime = 'REPOS';
+                        }
                     }
 
-                    return {
-                        ...row,
-                        roleLabel: role?.label || row.employeeRole,
-                        displayTime,
-                        arrival: slot?.arrival || '',
-                        departure: slot?.departure || '',
-                    };
-                })
-                .sort((a, b) => {
-                    const roleIndexA = orderedRoles.findIndex((role) => role.label === a.roleLabel || role.id === a.employeeRole);
-                    const roleIndexB = orderedRoles.findIndex((role) => role.label === b.roleLabel || role.id === b.employeeRole);
-                    if (roleIndexA !== roleIndexB) return roleIndexA - roleIndexB;
-                    return a.employeeName.localeCompare(b.employeeName);
+                    return { ...row, displayTime, isRepos, isAbsence, absenceCodes };
                 });
+
+                const groupedByRole: Record<string, any[]> = {};
+                detailRows.forEach(r => {
+                    if (!groupedByRole[r.roleLabel]) groupedByRole[r.roleLabel] = [];
+                    groupedByRole[r.roleLabel].push(r);
+                });
+
+                return {
+                    type: 'details' as const,
+                    date,
+                    serviceLabel: service.toUpperCase(),
+                    label: `FEUILLE DE PRÉSENCE - ${service.toUpperCase()} - ${format(parseISO(date), 'EEEE dd MMMM yyyy', { locale: fr })}`,
+                    groupedRows: groupedByRole,
+                };
+            });
+        }
+
+        return dates.map((date) => {
+            const detailRows = allRows.map(row => {
+                const shift = row.shifts[date];
+                let displayTime = '';
+                let isRepos = false;
+                let isAbsence = false;
+                let absenceCodes: string[] = [];
+
+                if (shift) {
+                    const h = (shift.segments || []).filter((s: any) => s.type === 'horaire' && s.start && s.end);
+                    if (h.length > 0) {
+                        displayTime = h.map((s: any) => `${s.start}-${s.end}`).join(' / ');
+                    }
+                    
+                    const codes = (shift.segments || []).filter((s: any) => s.label && s.label !== 'REPOS');
+                    if (codes.length > 0) {
+                        absenceCodes = codes.map((s: any) => s.label);
+                        isAbsence = true;
+                    }
+
+                    if (shift.type === 'repos') {
+                        isRepos = true;
+                        displayTime = 'REPOS';
+                    }
+                }
+
+                return { ...row, displayTime, isRepos, isAbsence, absenceCodes };
+            });
+
+            const groupedByRole: Record<string, any[]> = {};
+            detailRows.forEach(r => {
+                if (!groupedByRole[r.roleLabel]) groupedByRole[r.roleLabel] = [];
+                groupedByRole[r.roleLabel].push(r);
+            });
 
             return {
                 type: 'details' as const,
                 date,
                 label: format(parseISO(date), 'EEEE dd MMMM yyyy', { locale: fr }),
-                rows,
+                groupedRows: groupedByRole,
             };
-        }).filter((page) => page.type === 'details' && page.rows.length > 0);
-    }, [planning, exportMode, weekViewType, dayDate, weekDates, selectedRoles, orderedRoles]);
+        }).filter((page) => page.type === 'details' && Object.keys(page.groupedRows).length > 0);
+    }, [planning, employees, exportMode, weekViewType, dayDate, weekDates, selectedRoles, orderedRoles]);
 
     if (!isOpen) return null;
 
-    const toggleRole = (roleId: string) => {
-        setSelectedRoles((prev) => prev.includes(roleId) ? prev.filter((id) => id !== roleId) : [...prev, roleId]);
-    };
-
     const handleExport = async () => {
-        if (!previewRef.current || pages.length === 0) return;
-        try {
-            setExporting(true);
-            const { default: html2canvas } = await import('html2canvas');
-            const { jsPDF } = await import('jspdf');
-            const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-            const pageNodes = Array.from(previewRef.current.querySelectorAll('[data-export-page="true"]')) as HTMLElement[];
+        if (!planning) return;
+        setExporting(true);
 
-            for (let index = 0; index < pageNodes.length; index += 1) {
-                const node = pageNodes[index];
-                const isLandscape = node.getAttribute('data-landscape') === 'true';
+        try {
+            const { jsPDF } = await import('jspdf');
+            const { default: autoTable } = await import('jspdf-autotable');
+            
+            const hexToRgb = (hex: string): [number, number, number] => {
+                const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+                return result ? [parseInt(result[1], 16), parseInt(result[2], 16), parseInt(result[3], 16)] : [0, 0, 0];
+            };
+
+            const headerColorRgb = hexToRgb(headerBgColor);
+            const textColorRgb = hexToRgb(headerTextColor);
+
+            const [settings, rawAbsenceData] = await Promise.all([
+                planningApi.getSettings(),
+                Promise.resolve(null) // placeholder
+            ]);
+
+            const dynamicAbsences = Array.isArray(settings?.absenceCodes) ? settings.absenceCodes : [];
+            
+            const getDynamicStyles = (hexColor: string): { bg: [number, number, number], text: [number, number, number] } => {
+                const bg = hexToRgb(hexColor);
+                const [r, g, b] = bg;
+                const hex = hexColor.toUpperCase().replace('#', '');
                 
-                const canvas = await html2canvas(node, {
-                    scale: 2,
-                    useCORS: true,
-                    backgroundColor: '#ffffff',
-                    onclone: (clonedDoc) => {
-                        const allElements = clonedDoc.getElementsByTagName('*');
-                        for (let i = 0; i < allElements.length; i++) {
-                            const el = allElements[i] as HTMLElement;
-                            if (el.style) {
-                                // On s'assure qu'aucune couleur oklch ne traîne
+                // Noir absolu
+                if (hex === '000000') return { bg, text: [255, 255, 255] };
+                // Blanc absolu
+                if (hex === 'FFFFFF') return { bg, text: [0, 0, 0] };
+                
+                // Calcul du texte foncé (Version assombrie de la couleur de fond)
+                // On réduit la luminosité de ~60% pour garantir le contraste
+                const text: [number, number, number] = [
+                    Math.max(0, Math.floor(r * 0.35)),
+                    Math.max(0, Math.floor(g * 0.35)),
+                    Math.max(0, Math.floor(b * 0.35))
+                ];
+                
+                return { bg, text };
+            };
+
+            const dayDateStr = dayDate || weekDates[0];
+
+            if (exportMode === 'day') {
+                const doc = new jsPDF('portrait');
+                const dayDateObj = parseISO(dayDateStr);
+                const dayStr = format(dayDateObj, 'eeee d MMMM yyyy', { locale: fr }).toUpperCase();
+                const drawServicePage = (serviceName: 'MIDI' | 'SOIR') => {
+                    const PAGE_WIDTH = 210;
+                    const PAGE_HEIGHT = 297;
+                    const MARGIN_X = 10;
+                    const TOP_MARGIN = 5; // Réduit à 5mm du haut
+                    const BOTTOM_MARGIN = 5;
+                    const USABLE_HEIGHT = 287; // 297 - 5 - 5
+                    
+                    // --- TITRE OPTIMISÉ (Petit, Gras, Surligné Jaune) ---
+                    const companyName = user?.company_name || "";
+                    const titleText = `${companyName} - FEUILLE DE PRÉSENCE - ${serviceName} - ${dayStr}`;
+                    doc.setFontSize(10); // Plus petit
+                    doc.setFont('helvetica', 'bold');
+                    
+                    const textWidth = doc.getTextWidth(titleText);
+                    const textHeight = 6;
+                    const xPos = (PAGE_WIDTH - textWidth) / 2;
+                    
+                    // Dessin du surlignage jaune
+                    doc.setFillColor(255, 255, 0); // Jaune vif
+                    doc.rect(xPos - 2, TOP_MARGIN - 4, textWidth + 4, textHeight, 'F');
+                    
+                    // Texte du titre par-dessus
+                    doc.setTextColor(0);
+                    doc.text(titleText, PAGE_WIDTH / 2, TOP_MARGIN, { align: 'center' });
+
+                    // --- CONFIGURATION TABLEAU ---
+                    const headRow = ['Employé', 'Horaires'];
+                    const usableWidth = PAGE_WIDTH - (MARGIN_X * 2);
+                    const columnStyles: any = {
+                        0: { cellWidth: usableWidth * 0.22, fontStyle: 'bold', halign: 'left' }, // Employé
+                        1: { cellWidth: usableWidth * 0.10, halign: 'center' }  // Horaires
+                    };
+
+                    let colIndex = 2;
+                    if (includeArrival) { headRow.push('Arrivée'); columnStyles[colIndex++] = { cellWidth: usableWidth * 0.18, halign: 'center' }; }
+                    if (includeDeparture) { headRow.push('Départ'); columnStyles[colIndex++] = { cellWidth: usableWidth * 0.18, halign: 'center' }; }
+                    if (includeSignature) { headRow.push('Signature'); columnStyles[colIndex++] = { cellWidth: usableWidth * 0.32, halign: 'left' }; }
+
+                    // Préparation des données
+                    const bodyData: any[] = [];
+                    let currentRole = '';
+
+                    const filteredRows = employees.map(emp => {
+                        const existingPlanningRow = planning.rows.find(r => r.employeeId === emp.id);
+                        return {
+                            employeeId: emp.id,
+                            employeeName: `${(emp.last_name || '').toUpperCase()} ${emp.first_name || ''}`.trim().replace(/\n/g, ' '),
+                            employeeRole: emp.position || 'GENERAL',
+                            shifts: existingPlanningRow?.shifts || {}
+                        };
+                    }).filter(r => selectedRoles.includes(r.employeeRole));
+
+                    filteredRows.sort((a, b) => {
+                        const idxA = rolesOrder.indexOf(a.employeeRole);
+                        const idxB = rolesOrder.indexOf(b.employeeRole);
+                        if (idxA !== idxB) return idxA - idxB;
+                        return a.employeeName.localeCompare(b.employeeName);
+                    });
+
+                    filteredRows.forEach(row => {
+                        const shift = row.shifts[dayDateStr];
+                        let cellContent = '';
+                        let aaSegment = null;
+
+                        if (shift?.segments) {
+                            const serviceSegments = shift.segments.filter(s => {
+                                if (s.type === 'code') return true;
+                                if (s.type === 'horaire' && s.start) {
+                                    if (serviceName === 'MIDI') return s.start < "14:00";
+                                    return s.start >= "14:00" || (s.start < "14:00" && s.end >= "18:00");
+                                }
+                                return false;
+                            });
+
+                            aaSegment = serviceSegments.find(s => s.label === 'AA');
+                            
+                            // On cherche un code prioritaire (autre que AA ou REPOS)
+                            const priorityCode = serviceSegments.find(s => s.label && s.label !== 'AA' && s.label !== 'REPOS');
+
+                            if (priorityCode) {
+                                cellContent = priorityCode.label;
+                            } else {
+                                // On affiche les horaires même si AA est présent sur le segment
+                                const horaires = serviceSegments.filter(s => s.type === 'horaire' && s.start && s.end);
+                                if (horaires.length > 0) {
+                                    cellContent = horaires.map(s => `${s.start}-${s.end}`).join(' ');
+                                } else if (serviceSegments.some(s => s.label === 'REPOS')) {
+                                    cellContent = 'REPOS';
+                                } else if (aaSegment) {
+                                    cellContent = ''; // Garder vide si c'est juste un code AA sans horaires
+                                }
                             }
                         }
+                        // Ajout du titre de catégorie (Poste) - COLORÉ ET CENTRÉ
+                        if (row.employeeRole !== currentRole) {
+                            currentRole = row.employeeRole;
+                            const roleLabel = (roles.find(r => r.id === currentRole)?.label || currentRole).toUpperCase();
+                            bodyData.push([{
+                                content: roleLabel,
+                                colSpan: headRow.length,
+                                styles: { 
+                                    fillColor: headerColorRgb, 
+                                    textColor: textColorRgb, 
+                                    fontStyle: 'bold', 
+                                    halign: 'center', 
+                                    fontSize: 8.5,
+                                    minCellHeight: 6
+                                }
+                            }]);
+                        }
+
+                        const rowData: any[] = [row.employeeName.replace(/\n/g, ' '), cellContent.replace(/\n/g, ' ')];
+                        if (includeArrival) rowData.push(aaSegment ? 'AA' : '');
+                        if (includeDeparture) rowData.push('');
+                        if (includeSignature) rowData.push('');
+                        
+                        bodyData.push(rowData);
+                    });
+
+                    // --- CALCUL DYNAMIQUE DE LA HAUTEUR STRICT (MÉTHODE ÉLASTIQUE V3) ---
+                    const totalRowsCount = bodyData.length;
+                    
+                    // Zone utile hyper-sécurisée : 250mm pour éviter tout saut de page fantôme
+                    const availableTableHeight = 250; 
+                    
+                    // Calcul de la hauteur idéale
+                    let rowHeight = availableTableHeight / totalRowsCount;
+                    if (rowHeight > 8) rowHeight = 8;
+                    if (rowHeight < 4.0) rowHeight = 4.0;
+                    
+                    // Ajustement intelligent de la police et du padding
+                    let fontSize = 9;
+                    let cellPadding = 1.0;
+                    
+                    if (totalRowsCount > 45) {
+                        fontSize = 6.5;
+                        cellPadding = 0.4;
+                    } else if (totalRowsCount > 35) {
+                        fontSize = 7.5;
+                        cellPadding = 0.6;
+                    } else if (rowHeight > 7.0) {
+                        fontSize = 9;
+                        cellPadding = 1.6;
+                    } else if (rowHeight > 6.0) {
+                        fontSize = 8.5;
+                        cellPadding = 1.2;
                     }
+
+                    autoTable(doc, {
+                        startY: TOP_MARGIN + 10, // Un peu plus bas pour le titre
+                        head: [headRow],
+                        body: bodyData,
+                        theme: 'grid',
+                        styles: { 
+                            fontSize: fontSize, 
+                            cellPadding: cellPadding, 
+                            minCellHeight: rowHeight, 
+                            valign: 'middle', 
+                            lineColor: [80, 80, 80], 
+                            lineWidth: 0.1,
+                            overflow: 'hidden'
+                        },
+                        didParseCell: function(data) {
+                            if (data.section === 'body') {
+                                // 1. Noms toujours en NOIR
+                                if (data.column.index === 0) {
+                                    data.cell.styles.textColor = [0, 0, 0];
+                                }
+
+                                // 2. Colonne Horaires / Absences (Colonne 1)
+                                if (data.column.index === 1) {
+                                    const cellValue = String(data.cell.raw || "").toUpperCase();
+                                    
+                                        // REPOS : Toujours Noir/Blanc par défaut
+                                        if (cellValue === "REPOS") {
+                                            data.cell.styles.fillColor = [0, 0, 0];
+                                            data.cell.styles.textColor = [255, 255, 255];
+                                            data.cell.styles.fontStyle = 'bold';
+                                            data.cell.styles.halign = 'center';
+                                        } else {
+                                            const empName = String(data.row.cells[0].raw || "").trim();
+                                            const empData = filteredRows.find(r => r.employeeName === empName);
+                                            const shift = empData?.shifts[dayDateStr];
+                                            // On filtre les segments pour ce service uniquement
+                                            const serviceSegments = shift?.segments?.filter((s: any) => {
+                                                if (s.type === 'code') return true;
+                                                if (s.type === 'horaire' && s.start) {
+                                                    if (serviceName === 'MIDI') return s.start < "14:00";
+                                                    return s.start >= "14:00" || (s.start < "14:00" && s.end >= "18:00");
+                                                }
+                                                return false;
+                                            }) || [];
+
+                                            // On cherche un code d'absence (AA, CP, etc.)
+                                            const absSeg = serviceSegments.find((s: any) => s.label && s.label !== 'REPOS');
+                                            const absConfig = absSeg ? dynamicAbsences.find((a: any) => a.code === absSeg.label) : null;
+                                            
+                                            let targetColor = absSeg?.colorOverride || absConfig?.color;
+
+                                            // On ne met de couleur QUE si c'est une absence (pas pour les horaires normaux)
+                                            if (targetColor && targetColor.toUpperCase() !== '#FFFFFF') {
+                                                const styles = getDynamicStyles(targetColor);
+                                                data.cell.styles.fillColor = styles.bg;
+                                                data.cell.styles.textColor = styles.text;
+                                                data.cell.styles.fontStyle = 'bold';
+                                                data.cell.styles.halign = 'center';
+                                            }
+                                        }
+                                }
+
+                                // 3. Colonnes Arrivée/Départ (2 et 3) : Centrage et AA en rouge
+                                if (data.column.index === 2 || data.column.index === 3) {
+                                    data.cell.styles.halign = 'center';
+                                    const absCode = String(data.cell.raw).toUpperCase();
+                                    const absConfig = dynamicAbsences.find((a: any) => absCode === String(a.code).toUpperCase());
+                                    
+                                    if (absConfig && absConfig.color) {
+                                        const styles = getDynamicStyles(absConfig.color);
+                                        data.cell.styles.fillColor = styles.bg;
+                                        data.cell.styles.textColor = styles.text;
+                                        data.cell.styles.fontStyle = 'bold';
+                                    } else if (absCode === 'AA') {
+                                        // Fallback historique si non configuré dans les codes dynamiques
+                                        data.cell.styles.fontStyle = 'bold';
+                                        data.cell.styles.textColor = [255, 255, 255];
+                                        data.cell.styles.fillColor = [211, 47, 47]; // Rouge AA
+                                    }
+                                }
+                            }
+                        },
+                        headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold', halign: 'center' },
+                        columnStyles: columnStyles,
+                        margin: { left: MARGIN_X, right: MARGIN_X, bottom: BOTTOM_MARGIN },
+                        pageBreak: 'avoid',
+                        showFoot: 'never',
+                        showHead: 'firstPage'
+                    });
+                };
+
+                drawServicePage('MIDI');
+                doc.addPage();
+                drawServicePage('SOIR');
+                
+                const fileName = `Feuille_de_presence_${dayDateStr}.pdf`;
+                doc.save(fileName);
+
+            } else {
+                // WEEK MODE - GRID
+                const doc = new jsPDF('landscape');
+                const weekStartDate = parseISO(weekDates[0]);
+                
+                doc.setFontSize(18);
+                const companyName = user?.company_name || "Votre Établissement";
+                doc.text(`Planning ${companyName} - ${planning.service}`, 14, 15);
+                doc.setFontSize(11);
+                doc.setTextColor(100);
+                doc.text(`Semaine du ${format(weekStartDate, 'dd MMMM yyyy', { locale: fr })} au ${format(addDays(weekStartDate, 6), 'dd MMMM yyyy', { locale: fr })}`, 14, 22);
+                
+                const weekDatesArr = Array.from({ length: 7 }, (_, i) => format(addDays(weekStartDate, i), 'yyyy-MM-dd'));
+                const days = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
+                
+                const bodyData: any[] = [];
+                const sortedEmployees = employees.filter(e => selectedRoles.includes(e.position || 'GENERAL')).sort((a, b) => {
+                    const idxA = rolesOrder.indexOf(a.position || 'GENERAL');
+                    const idxB = rolesOrder.indexOf(b.position || 'GENERAL');
+                    if (idxA !== idxB) return idxA - idxB;
+                    return (a.last_name || '').localeCompare(b.last_name || '');
                 });
-                const imgData = canvas.toDataURL('image/png');
-                
-                if (index > 0) pdf.addPage(isLandscape ? 'l' : 'p');
-                else if (isLandscape) pdf.setPage(1);
-                
-                if (index === 0 && isLandscape) {
-                    pdf.deletePage(1);
-                    pdf.addPage('l', 'mm', 'a4');
-                }
 
-                const pdfWidth = pdf.internal.pageSize.getWidth();
-                const pdfHeight = pdf.internal.pageSize.getHeight();
-                const ratio = Math.min(pdfWidth / canvas.width, pdfHeight / canvas.height);
-                const imageWidth = canvas.width * ratio;
-                const imageHeight = canvas.height * ratio;
-                const x = (pdfWidth - imageWidth) / 2;
-                const y = (pdfHeight - imageHeight) / 2;
+                let currentRole = '';
+                sortedEmployees.forEach(emp => {
+                    const role = emp.position || 'GENERAL';
+                    if (role !== currentRole) {
+                        currentRole = role;
+                        const label = roles.find(r => r.id === currentRole)?.label || role;
+                        bodyData.push([{ content: label.toUpperCase(), colSpan: 8, styles: { fillColor: headerColorRgb, textColor: textColorRgb, fontStyle: 'bold', halign: 'center', fontSize: 10 } }]);
+                    }
 
-                pdf.addImage(imgData, 'PNG', x, y, imageWidth, imageHeight, undefined, 'FAST');
+                    const planningRow = planning.rows.find(r => r.employeeId === emp.id);
+                    const rowData: any[] = [`${(emp.last_name || '').toUpperCase()} ${emp.first_name || ''}`.trim()];
+
+                    weekDatesArr.forEach(date => {
+                        const s = planningRow?.shifts[date];
+                        if (!s?.segments?.length) { rowData.push(''); return; }
+                        
+                        const text = s.segments.map(seg => seg.type === 'horaire' ? `${seg.start}-${seg.end}` : seg.label).join('\n');
+                        const seg = s.segments[0]; // Logic based on the first segment's color
+                        
+                        let cellBgColor: string | null = null;
+
+                        const isAbsence = seg.label === 'REPOS' || (seg.label && dynamicAbsences.some((t: any) => t.code === seg.label));
+
+                        if (isAbsence && seg.label) {
+                            if (seg.label === 'REPOS') {
+                                cellBgColor = '#000000';
+                            } else {
+                                const absConfig = dynamicAbsences.find((a: any) => a.code === seg.label);
+                                cellBgColor = absConfig?.color || '#000000';
+                            }
+                        } else if (seg.type === 'horaire') {
+                            cellBgColor = seg.colorOverride || seg.color || null;
+                        }
+
+                        if (cellBgColor && cellBgColor.toUpperCase() !== '#FFFFFF' && text.trim() !== '') {
+                            const styles = getDynamicStyles(cellBgColor);
+                            rowData.push({ 
+                                content: text, 
+                                styles: { 
+                                    fillColor: styles.bg, 
+                                    textColor: styles.text, 
+                                    fontStyle: 'bold' 
+                                } 
+                            });
+                        } else {
+                            rowData.push(text);
+                        }
+                    });
+                    bodyData.push(rowData);
+                });
+
+                // KPI ROW with ExtraShifts
+                const kpiRow = ['TOTAL STAFF'];
+                weekDatesArr.forEach(date => {
+                    let midi = 0, soir = 0;
+                    planning.rows.forEach(r => {
+                        if (selectedRoles.includes(r.employeeRole || 'GENERAL')) {
+                            const s = r.shifts[date];
+                            s?.segments?.forEach(seg => {
+                                if (seg.type === 'horaire' && seg.start && seg.end) {
+                                    if (seg.start < "16:00") midi++;
+                                    if (seg.end >= "16:00" || seg.end < seg.start) soir++;
+                                }
+                            });
+                        }
+                    });
+                    (planning.extraShifts || []).forEach(e => {
+                        if (e.date === date) {
+                            if (e.start < "16:00") midi += e.count;
+                            if (e.end >= "16:00" || e.end < e.start) soir += e.count;
+                        }
+                    });
+                    kpiRow.push(`M: ${midi} / S: ${soir}`);
+                });
+                bodyData.push(kpiRow);
+
+                autoTable(doc, {
+                    startY: 30,
+                    head: [['Employé', ...days]],
+                    body: bodyData,
+                    theme: 'grid',
+                    styles: { fontSize: 8, cellPadding: 2, overflow: 'linebreak', halign: 'center', valign: 'middle' },
+                    headStyles: { fillColor: headerColorRgb, textColor: textColorRgb, fontStyle: 'bold' },
+                    columnStyles: { 0: { halign: 'left', fontStyle: 'bold', cellWidth: 40 } }
+                });
+
+                const pdfBlob = doc.output('blob');
+                const url = URL.createObjectURL(pdfBlob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `Planning_${planning.service}_${format(weekStartDate, 'yyyy-MM-dd')}.pdf`;
+                document.body.appendChild(link);
+                link.click();
+                setTimeout(() => {
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                }, 100);
             }
-
-            const fileName = exportMode === 'week'
-                ? `planning-semaine-${format(currentWeekStart, 'yyyy-MM-dd')}.pdf`
-                : `planning-jour-${dayDate || format(currentWeekStart, 'yyyy-MM-dd')}.pdf`;
-            pdf.save(fileName);
         } catch (error) {
-            console.error('Planning export failed', error);
+            console.error('Export failed', error);
             alert('Erreur lors de l\'export PDF.');
         } finally {
             setExporting(false);
         }
     };
 
+    const toggleRole = (roleId: string) => {
+        setSelectedRoles((prev) => prev.includes(roleId) ? prev.filter((id) => id !== roleId) : [...prev, roleId]);
+    };
+
     return (
-        <div className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="w-full max-w-2xl max-h-[92vh] overflow-hidden rounded-[24px] bg-white shadow-2xl border border-slate-200 flex flex-col">
-                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-                    <h2 className="text-xl font-bold text-slate-800">Paramètres d'export</h2>
-                    <button onClick={onClose} className="text-slate-400 hover:text-slate-900 transition-colors p-1"><X size={24} /></button>
+        <div className="fixed inset-0 z-[80] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="w-full max-w-lg max-h-[90vh] overflow-hidden rounded-2xl bg-white dark:bg-slate-800 shadow-2xl border border-slate-200 dark:border-white/10 flex flex-col">
+                <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200 dark:border-white/5 bg-slate-50/50 dark:bg-slate-900/50 shrink-0">
+                    <h2 className="text-sm font-bold text-slate-800 dark:text-white">Export Planning</h2>
+                    <button onClick={onClose} className="text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors p-1"><X size={18} /></button>
                 </div>
 
-                <div className="px-6 pt-4 overflow-y-auto">
-                    <div className="inline-flex w-full rounded-xl bg-slate-100 p-1">
-                        <button onClick={() => setExportMode('week')} className={`flex-1 rounded-lg px-4 py-2 text-sm font-semibold transition-all ${exportMode === 'week' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}>Semaine complète</button>
-                        <button onClick={() => setExportMode('day')} className={`flex-1 rounded-lg px-4 py-2 text-sm font-semibold transition-all ${exportMode === 'day' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}>Jour unique</button>
+                <div className="px-4 py-3 overflow-y-auto text-sm">
+                    <div className="inline-flex w-full rounded-lg bg-slate-100 dark:bg-slate-900 p-0.5 mb-3">
+                        <button onClick={() => setExportMode('week')} className={`flex-1 rounded-md px-3 py-1 text-xs font-bold transition-all ${exportMode === 'week' ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-slate-500 dark:text-slate-500'}`}>Semaine</button>
+                        <button onClick={() => setExportMode('day')} className={`flex-1 rounded-md px-3 py-1 text-xs font-bold transition-all ${exportMode === 'day' ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-slate-500 dark:text-slate-500'}`}>Jour</button>
                     </div>
 
-                    {exportMode === 'week' && (
-                        <div className="mt-4 inline-flex w-full rounded-xl bg-slate-100 p-1">
-                            <button onClick={() => setWeekViewType('grid')} className={`flex-1 rounded-lg px-4 py-2 text-xs font-bold transition-all ${weekViewType === 'grid' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}>Vue Grille (Recap)</button>
-                            <button onClick={() => setWeekViewType('details')} className={`flex-1 rounded-lg px-4 py-2 text-xs font-bold transition-all ${weekViewType === 'details' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}>Vue Détails (Émargement)</button>
-                        </div>
-                    )}
-
                     {exportMode === 'day' && (
-                        <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/50 p-4">
-                            <label className="block text-xs font-bold text-blue-800 mb-2">Sélectionnez le jour :</label>
-                            <select value={dayDate} onChange={(e) => setDayDate(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none">
+                        <div className="mt-2 rounded-lg border border-blue-100 dark:border-blue-500/20 bg-blue-50/50 dark:bg-blue-500/5 p-2">
+                            <select value={dayDate} onChange={(e) => setDayDate(e.target.value)} className="w-full h-9 rounded-md border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 px-2 text-xs text-slate-800 dark:text-white outline-none">
                                 {weekDates.map((date) => (
                                     <option key={date} value={date}>{format(parseISO(date), 'EEEE d MMMM', { locale: fr })}</option>
                                 ))}
@@ -264,26 +689,28 @@ export const PlanningExportModal: React.FC<PlanningExportModalProps> = ({
                         </div>
                     )}
 
-                    <div className="mt-6 space-y-6 pb-6">
+                    <div className="mt-4 space-y-4 pb-4">
                         <section>
-                            <div className="flex items-center gap-2 mb-3">
-                                <CheckSquare size={18} className="text-slate-700" />
-                                <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider">Personnalisation</h3>
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div className="rounded-xl border border-slate-200 p-3">
-                                    <p className="text-xs font-bold text-slate-500 mb-2 uppercase">Fond Entêtes</p>
-                                    <div className="flex flex-wrap gap-2">
+                            <div className="flex items-center gap-4 mb-2">
+                                <div className="flex-1">
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <CheckSquare size={14} className="text-slate-600 dark:text-slate-400" />
+                                        <h3 className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest">Fond Entêtes</h3>
+                                    </div>
+                                    <div className="flex flex-wrap gap-1.5">
                                         {HEADER_BG_COLORS.map((color) => (
-                                            <button key={color} onClick={() => setHeaderBgColor(color)} className={`h-7 w-7 rounded-full border-2 transition-all ${headerBgColor === color ? 'border-blue-500 scale-110' : 'border-white shadow-sm'}`} style={{ backgroundColor: color }} />
+                                            <button key={color} onClick={() => setHeaderBgColor(color)} className={`h-6 w-6 rounded-full border-2 transition-all ${headerBgColor === color ? 'border-blue-500 scale-110' : 'border-white shadow-sm'}`} style={{ backgroundColor: color }} />
                                         ))}
                                     </div>
                                 </div>
-                                <div className="rounded-xl border border-slate-200 p-3">
-                                    <p className="text-xs font-bold text-slate-500 mb-2 uppercase">Texte Entêtes</p>
-                                    <div className="flex flex-wrap gap-2">
+                                <div className="w-[100px]">
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <FileText size={14} className="text-slate-600 dark:text-slate-400" />
+                                        <h3 className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest">Texte</h3>
+                                    </div>
+                                    <div className="flex flex-wrap gap-1.5">
                                         {HEADER_TEXT_COLORS.map((color) => (
-                                            <button key={color} onClick={() => setHeaderTextColor(color)} className={`h-7 w-7 rounded-full border-2 transition-all ${headerTextColor === color ? 'border-blue-500 scale-110' : 'border-slate-200'}`} style={{ backgroundColor: color }} />
+                                            <button key={color} onClick={() => setHeaderTextColor(color)} className={`h-6 w-6 rounded-full border-2 transition-all ${headerTextColor === color ? 'border-blue-500 scale-110' : 'border-white shadow-sm'}`} style={{ backgroundColor: color }} />
                                         ))}
                                     </div>
                                 </div>
@@ -291,18 +718,18 @@ export const PlanningExportModal: React.FC<PlanningExportModalProps> = ({
                         </section>
 
                         <section>
-                            <div className="flex items-center gap-2 mb-3">
-                                <LayoutPanelLeft size={18} className="text-slate-700" />
-                                <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider">Colonnes à afficher</h3>
+                            <div className="flex items-center gap-2 mb-2">
+                                <LayoutPanelLeft size={14} className="text-slate-600 dark:text-slate-400" />
+                                <h3 className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest">Colonnes à afficher</h3>
                             </div>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                            <div className="grid grid-cols-3 gap-2">
                                 {[
                                     { label: 'Heure arrivée', checked: includeArrival, setChecked: setIncludeArrival },
                                     { label: 'Heure départ', checked: includeDeparture, setChecked: setIncludeDeparture },
                                     { label: 'Signature', checked: includeSignature, setChecked: setIncludeSignature },
                                 ].map((item) => (
-                                    <button key={item.label} onClick={() => item.setChecked(!item.checked)} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm font-medium transition-colors ${item.checked ? 'border-blue-300 bg-blue-50 text-slate-700' : 'border-slate-200 bg-white text-slate-500'}`}>
-                                        <input type="checkbox" readOnly checked={item.checked} className="h-4 w-4 accent-blue-600" />
+                                    <button key={item.label} onClick={() => item.setChecked(!item.checked)} className={`flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-left text-[10px] font-bold transition-colors ${item.checked ? 'border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400' : 'border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-500'}`}>
+                                        <input type="checkbox" readOnly checked={item.checked} className="h-3 w-3 accent-blue-600" />
                                         <span>{item.label}</span>
                                     </button>
                                 ))}
@@ -310,20 +737,20 @@ export const PlanningExportModal: React.FC<PlanningExportModalProps> = ({
                         </section>
 
                         <section>
-                            <div className="flex items-center justify-between mb-3">
-                                <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider">Postes à inclure</h3>
-                                <div className="flex items-center gap-3 text-xs font-bold">
-                                    <button onClick={() => setSelectedRoles(orderedRoles.map((role) => role.id))} className="text-blue-600 hover:underline">Tout cocher</button>
-                                    <button onClick={() => setSelectedRoles([])} className="text-slate-400 hover:underline">Tout décocher</button>
+                            <div className="flex items-center justify-between mb-2">
+                                <h3 className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest">Postes</h3>
+                                <div className="flex items-center gap-3 text-[9px] font-black">
+                                    <button onClick={() => setSelectedRoles(orderedRoles.map((role) => role.id))} className="text-blue-600 dark:text-blue-400 hover:underline uppercase">Tout</button>
+                                    <button onClick={() => setSelectedRoles([])} className="text-slate-400 dark:text-slate-600 hover:underline uppercase">Aucun</button>
                                 </div>
                             </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-[180px] overflow-y-auto pr-1">
+                            <div className="grid grid-cols-2 gap-1.5 max-h-[120px] overflow-y-auto pr-1">
                                 {orderedRoles.map((role) => {
                                     const checked = selectedRoles.includes(role.id);
                                     return (
-                                        <button key={role.id} onClick={() => toggleRole(role.id)} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm font-semibold transition-colors ${checked ? 'border-blue-300 bg-blue-50 text-slate-700' : 'border-slate-200 bg-white text-slate-500'}`}>
-                                            <input type="checkbox" readOnly checked={checked} className="h-4 w-4 accent-blue-600" />
-                                            <span>{role.label}</span>
+                                        <button key={role.id} onClick={() => toggleRole(role.id)} className={`flex items-center gap-2 rounded-md border px-2 py-1.5 text-left text-[10px] font-bold transition-colors ${checked ? 'border-blue-100 dark:border-blue-500/20 bg-blue-50/50 dark:bg-blue-500/5 text-blue-700 dark:text-blue-400' : 'border-slate-100 dark:border-white/5 bg-white dark:bg-slate-900 text-slate-400 dark:text-slate-600'}`}>
+                                            <input type="checkbox" readOnly checked={checked} className="h-3 w-3 accent-blue-600" />
+                                            <span className="truncate">{role.label}</span>
                                         </button>
                                     );
                                 })}
@@ -332,120 +759,13 @@ export const PlanningExportModal: React.FC<PlanningExportModalProps> = ({
                     </div>
                 </div>
 
-                <div className="border-t border-slate-200 px-6 py-4 flex items-center justify-end gap-3 bg-slate-50/50">
-                    <button onClick={onClose} className="rounded-xl border border-slate-300 px-6 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-100 transition-colors">Annuler</button>
-                    <button onClick={handleExport} disabled={exporting || pages.length === 0} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-6 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50 transition-all shadow-md active:scale-[0.98]">
-                        <Download size={18} /> {exporting ? 'Export...' : 'Exporter PDF'}
+                <div className="border-t border-slate-200 dark:border-white/10 px-4 py-2.5 flex items-center justify-end gap-2 bg-slate-50/80 dark:bg-slate-900/80 shrink-0">
+                    <button onClick={onClose} className="h-9 rounded-lg border border-slate-300 dark:border-white/10 px-4 text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors">Fermer</button>
+                    <button onClick={handleExport} disabled={exporting || !planning} className="h-9 inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 text-xs font-bold text-white hover:bg-blue-700 disabled:opacity-50 transition-all shadow-md active:scale-[0.98]">
+                        <Download size={14} /> {exporting ? '...' : 'Exporter PDF'}
                     </button>
-                </div>
-            </div>
-
-            <div className="fixed left-[-10000px] top-0 opacity-0 pointer-events-none">
-                <div ref={previewRef}>
-                    {pages.map((page: any) => (
-                        <div 
-                            key={page.label} 
-                            data-export-page="true" 
-                            data-landscape={page.type === 'grid' ? 'true' : 'false'}
-                            className={`${page.type === 'grid' ? 'w-[1123px] min-h-[794px]' : 'w-[794px] min-h-[1123px]'} bg-white px-10 py-8`}
-                            style={{ color: '#000000', backgroundColor: '#ffffff' }}
-                        >
-                            <div className="mb-6 px-6 py-5 flex items-center justify-between" style={{ backgroundColor: headerBgColor, color: headerTextColor, borderRadius: '0px' }}>
-                                <div>
-                                    <div className="text-2xl font-bold" style={{ color: headerTextColor }}>Planning {exportMode === 'week' ? 'Semaine' : 'Jour'}</div>
-                                    <div className="mt-1 text-base font-medium capitalize" style={{ color: headerTextColor }}>{page.label}</div>
-                                </div>
-                                <div className="text-right opacity-80">
-                                    <p className="text-xs font-bold uppercase tracking-widest" style={{ color: headerTextColor }}>IAmani SaaS</p>
-                                    <p className="text-[10px]" style={{ color: headerTextColor }}>{new Date().toLocaleDateString()}</p>
-                                </div>
-                            </div>
-
-                            {page.type === 'grid' ? (
-                                <div className="border border-[#000000]" style={{ borderRadius: '0px' }}>
-                                    <table className="w-full border-collapse text-[10px]">
-                                        <thead>
-                                            <tr style={{ backgroundColor: headerBgColor, color: headerTextColor }}>
-                                                <th className="border border-[#000000] px-2 py-2 text-left font-bold w-[120px]" style={{ borderColor: '#000000', color: headerTextColor }}>Poste / Employé</th>
-                                                {weekDates.map(date => (
-                                                    <th key={date} className="border border-[#000000] px-1 py-2 text-center font-bold" style={{ borderColor: '#000000', color: headerTextColor }}>
-                                                        <div className="capitalize">{format(parseISO(date), 'EEEE', { locale: fr })}</div>
-                                                        <div className="opacity-80">{format(parseISO(date), 'dd/MM')}</div>
-                                                    </th>
-                                                ))}
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {Object.entries(page.groupedRows).map(([role, employees]: [string, any]) => (
-                                                <React.Fragment key={role}>
-                                                    <tr style={{ backgroundColor: '#f1f5f9' }}>
-                                                        <td colSpan={8} className="border border-[#000000] px-2 py-1 font-bold uppercase text-[9px]" style={{ borderColor: '#000000', color: '#1e40af' }}>{role}</td>
-                                                    </tr>
-                                                    {employees.map((emp: any) => (
-                                                        <tr key={emp.employeeId}>
-                                                            <td className="border border-[#000000] px-2 py-1.5 font-medium" style={{ borderColor: '#000000', color: '#000000' }}>{emp.employeeName}</td>
-                                                            {weekDates.map(date => {
-                                                                const shift = emp.shifts[date];
-                                                                let text = '';
-                                                                let textColor = '#000000';
-                                                                let isBold = false;
-                                                                
-                                                                if (shift?.type === 'travail') {
-                                                                    const h = (shift.segments || []).filter((s: any) => s.type === 'horaire' && s.start && s.end);
-                                                                    text = h.map((s: any) => `${s.start}-${s.end}`).join('\n');
-                                                                } else if (shift?.segments?.[0]?.label) {
-                                                                    text = shift.segments[0].label;
-                                                                    textColor = '#94a3b8';
-                                                                    isBold = true;
-                                                                }
-
-                                                                return (
-                                                                    <td key={date} className="border border-[#000000] px-1 py-1.5 text-center whitespace-pre-line" style={{ borderColor: '#000000', color: textColor, fontWeight: isBold ? 'bold' : 'normal' }}>
-                                                                        {text || '—'}
-                                                                    </td>
-                                                                );
-                                                            })}
-                                                        </tr>
-                                                    ))}
-                                                </React.Fragment>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            ) : (
-                                <div className="border border-[#000000]" style={{ borderRadius: '0px' }}>
-                                    <table className="w-full border-collapse text-sm">
-                                        <thead>
-                                            <tr style={{ backgroundColor: headerBgColor, color: headerTextColor }}>
-                                                <th className="border border-[#000000] px-4 py-3 text-left text-base font-bold" style={{ borderColor: '#000000', color: headerTextColor }}>Employé</th>
-                                                <th className="border border-[#000000] px-4 py-3 text-left text-base font-bold" style={{ borderColor: '#000000', color: headerTextColor }}>Poste</th>
-                                                <th className="border border-[#000000] px-4 py-3 text-left text-base font-bold" style={{ borderColor: '#000000', color: headerTextColor }}>Horaires</th>
-                                                {includeSignature && <th className="border border-[#000000] px-4 py-3 text-left text-base font-bold" style={{ borderColor: '#000000', color: headerTextColor }}>Signature</th>}
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {page.rows.map((row: any) => (
-                                                <tr key={`${page.date}-${row.employeeId}`}>
-                                                    <td className="border border-[#000000] px-4 py-3 text-base" style={{ borderColor: '#000000', color: '#000000' }}>{row.employeeName}</td>
-                                                    <td className="border border-[#000000] px-4 py-3 text-base" style={{ borderColor: '#000000', color: '#000000' }}>{row.roleLabel}</td>
-                                                    <td className="border border-[#000000] px-4 py-3 text-base font-medium" style={{ borderColor: '#000000', color: '#000000' }}>{row.displayTime || '—'}</td>
-                                                    {includeSignature && <td className="border border-[#000000] px-4 py-3 h-[45px]" style={{ borderColor: '#000000' }} />}
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            )}
-
-                            {(!page.rows || (page.type === 'grid' && Object.keys(page.groupedRows).length === 0)) && (
-                                <div className="mt-8 border border-dashed border-[#cccccc] px-6 py-10 text-center text-lg" style={{ color: '#94a3b8', borderRadius: '0px' }}>Aucun employé planifié pour cette sélection.</div>
-                            )}
-                        </div>
-                    ))}
                 </div>
             </div>
         </div>
     );
 };
-
-export default PlanningExportModal;
