@@ -1,6 +1,14 @@
 // --- API Admin ---
 export const adminApi = {
     getStats: () => apiFetch('/admin/stats'),
+    getSentinelLogs: (category?: string, clientId?: string) => {
+        let url = '/admin/sentinel/logs';
+        const params = new URLSearchParams();
+        if (category) params.append('category', category);
+        if (clientId) params.append('clientId', clientId);
+        const qs = params.toString();
+        return apiFetch(qs ? `${url}?${qs}` : url);
+    },
     getClients: () => apiFetch('/admin/clients'),
     getClient: (clientId: string) => apiFetch(`/admin/clients/${clientId}`),
     uploadLogo: (logoBase64: string, mimeType: string) => apiFetch('/admin/upload-logo', { method: 'POST', body: JSON.stringify({ logoBase64, mimeType }) }),

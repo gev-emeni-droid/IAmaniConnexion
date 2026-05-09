@@ -7,8 +7,24 @@ import { compareSync, hashSync } from 'bcryptjs';
 export const app = new Hono().basePath('/api');
 app.use('*', cors());
 
-app.onError((err, c) => {
+app.onError(async (err, c) => {
     console.error('GLOBAL ERROR:', err);
+    
+    // Log System Error to Sentinel
+    try {
+        await ensureAuditLogsSchema(c);
+        await insertAuditLog(c, {
+            action: 'SYSTEM_ERROR',
+            category: LOG_CATEGORIES.SYSTEM,
+            severity: LOG_SEVERITIES.ALERT,
+            newValue: JSON.stringify({
+                message: err.message,
+                path: c.req.path,
+                stack: err.stack?.slice(0, 200)
+            })
+        });
+    } catch (logErr) {}
+
     return c.json({
         error: `Erreur Globale: ${err?.message || 'Erreur inconnue'}`,
         path: c.req.path,
@@ -16,7 +32,35 @@ app.onError((err, c) => {
     }, 500);
 });
 
+app.notFound(async (c) => {
+    // Log 404 to Sentinel
+    try {
+        await ensureAuditLogsSchema(c);
+        await insertAuditLog(c, {
+            action: 'NOT_FOUND',
+            category: LOG_CATEGORIES.SYSTEM,
+            severity: LOG_SEVERITIES.WARNING,
+            newValue: `404 - ${c.req.path}`
+        });
+    } catch (e) {}
+    return c.json({ error: 'Route non trouvée' }, 404);
+});
+
 // --- CONSTANTS ---
+const LOG_CATEGORIES = {
+    GLOBAL: 'global',
+    SECURITY: 'security',
+    BUSINESS: 'business',
+    SYSTEM: 'system'
+};
+
+const LOG_SEVERITIES = {
+    SUCCESS: 'success',
+    INFO: 'info',
+    WARNING: 'warning',
+    ALERT: 'alert'
+};
+
 const superAdminPayload = {
     id: 'superadmin',
     name: 'Super Admin',
@@ -197,6 +241,68 @@ const safeFirst = async (c, query, params = []) => {
     }
 };
 
+const safeRun = async (c, query, params = []) => {
+    try {
+        const db = c.env?.DB;
+        if (!db) return null;
+        return await db.prepare(query).bind(...params).run();
+    } catch (e) {
+        console.error('D1 Run Error:', e.message);
+        return null;
+    }
+};
+
+const insertAuditLog = async (c, params) => {
+    try {
+        const user = await getUserFromReq(c);
+        const userId = user?.id || 'system';
+        const ip = c.req.header('cf-connecting-ip') || c.req.header('x-real-ip') || '0.0.0.0';
+        const ua = c.req.header('user-agent') || 'unknown';
+        
+        await c.env.DB.prepare(`
+            INSERT INTO audit_logs (id, user_id, target_user_id, client_id, action, category, severity, old_value, new_value, ip_address, user_agent)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).bind(
+            generateId().substring(0, 12),
+            userId,
+            params.targetUserId || null,
+            params.clientId || params.targetClientId || null,
+            params.action,
+            params.category || 'global',
+            params.severity || 'info',
+            params.oldValue || null,
+            params.newValue || null,
+            ip,
+            ua
+        ).run();
+    } catch (e) {
+        console.error('Logging Error:', e);
+    }
+};
+
+const ensureAuditLogsSchema = async (c) => {
+    try {
+        const db = c.env.DB;
+        const info = await db.prepare('PRAGMA table_info(audit_logs)').all();
+        const cols = (info.results || []).map(r => r.name);
+        
+        if (!cols.includes('category')) {
+            await db.prepare("ALTER TABLE audit_logs ADD COLUMN category TEXT DEFAULT 'global'").run();
+        }
+        if (!cols.includes('severity')) {
+            await db.prepare("ALTER TABLE audit_logs ADD COLUMN severity TEXT DEFAULT 'info'").run();
+        }
+        if (!cols.includes('client_id')) {
+            await db.prepare("ALTER TABLE audit_logs ADD COLUMN client_id TEXT").run();
+        }
+        if (!cols.includes('user_agent')) {
+            await db.prepare("ALTER TABLE audit_logs ADD COLUMN user_agent TEXT").run();
+        }
+    } catch (e) {
+        console.error('Schema migration error (audit_logs):', e);
+    }
+};
+
 const renderEmail = (content, title = 'IAmani', brandName = 'IAmani') => {
     return `
 <!DOCTYPE html>
@@ -288,7 +394,20 @@ app.post('/auth/login', async (c) => {
 
             if (isValid) {
                 const adminUser = { id: String(admin.id), name: String(admin.name || 'Super Admin'), email: String(admin.email), type: 'admin', role: 'superadmin', permissions: ['all'] };
+                await insertAuditLog(c, {
+                    action: 'LOGIN_SUCCESS',
+                    category: LOG_CATEGORIES.SECURITY,
+                    severity: LOG_SEVERITIES.SUCCESS,
+                    newValue: `Connexion Admin réussie: ${identifier}`
+                });
                 return c.json({ token: await sign(adminUser, getSecret(c)), user: adminUser });
+            } else {
+                await insertAuditLog(c, {
+                    action: 'LOGIN_FAILED',
+                    category: LOG_CATEGORIES.SECURITY,
+                    severity: LOG_SEVERITIES.WARNING,
+                    newValue: `Échec connexion Admin (MDP): ${identifier}`
+                });
             }
         }
 
@@ -312,7 +431,22 @@ app.post('/auth/login', async (c) => {
                     type: 'client',
                     role: 'client'
                 };
+                await insertAuditLog(c, {
+                    action: 'LOGIN_SUCCESS',
+                    category: LOG_CATEGORIES.SECURITY,
+                    severity: LOG_SEVERITIES.SUCCESS,
+                    clientId: client.id,
+                    newValue: `Connexion Client réussie: ${identifier}`
+                });
                 return c.json({ token: await sign(user, getSecret(c)), user });
+            } else {
+                await insertAuditLog(c, {
+                    action: 'LOGIN_FAILED',
+                    category: LOG_CATEGORIES.SECURITY,
+                    severity: LOG_SEVERITIES.WARNING,
+                    clientId: client.id,
+                    newValue: `Échec connexion Client (MDP): ${identifier}`
+                });
             }
         }
 
@@ -341,9 +475,31 @@ app.post('/auth/login', async (c) => {
                     role: String(collab.role || 'staff'),
                     modules: typeof collab.modules_access === 'string' ? JSON.parse(collab.modules_access || '[]') : (collab.modules_access || [])
                 };
+                await insertAuditLog(c, {
+                    action: 'LOGIN_SUCCESS',
+                    category: LOG_CATEGORIES.SECURITY,
+                    severity: LOG_SEVERITIES.SUCCESS,
+                    clientId: collab.client_id,
+                    newValue: `Connexion Collaborateur réussie: ${identifier}`
+                });
                 return c.json({ token: await sign(user, getSecret(c)), user });
+            } else {
+                await insertAuditLog(c, {
+                    action: 'LOGIN_FAILED',
+                    category: LOG_CATEGORIES.SECURITY,
+                    severity: LOG_SEVERITIES.WARNING,
+                    clientId: collab.client_id,
+                    newValue: `Échec connexion Collaborateur (MDP): ${identifier}`
+                });
             }
         }
+
+        await insertAuditLog(c, {
+            action: 'LOGIN_NOT_FOUND',
+            category: LOG_CATEGORIES.SECURITY,
+            severity: LOG_SEVERITIES.ALERT,
+            newValue: `Identifiant inconnu: ${identifier}`
+        });
         return c.json({ error: 'Identifiants incorrects' }, 401);
     } catch (e) { return c.json({ error: 'Erreur Serveur' }, 500); }
 });
@@ -796,11 +952,58 @@ app.get('/admin/clients/:id/diagnostics', async (c) => {
     } catch (e) { return c.json({ error: 'Erreur' }, 500); }
 });
 
+app.get('/admin/sentinel/logs', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user || user.type !== 'admin') return c.json({ error: 'Accès refusé' }, 401);
+        
+        await ensureAuditLogsSchema(c);
+        
+        const category = c.req.query('category');
+        const clientId = c.req.query('clientId');
+        const limit = parseInt(c.req.query('limit') || '100');
+        
+        let query = `
+            SELECT 
+                al.*,
+                COALESCE(adm.name, cl.name, col.name, 'Système') as actor_name,
+                COALESCE(adm.email, cl.email, col.email, 'system@iamani.com') as actor_email,
+                target_cl.company_name as client_name
+            FROM audit_logs al
+            LEFT JOIN admins adm ON al.user_id = adm.id
+            LEFT JOIN clients cl ON al.user_id = cl.id
+            LEFT JOIN collaborators col ON al.user_id = col.id
+            LEFT JOIN clients target_cl ON al.client_id = target_cl.id
+            WHERE 1=1
+        `;
+        const params = [];
+        
+        if (category && category !== 'global') {
+            query += ` AND al.category = ?`;
+            params.push(category);
+        }
+        
+        if (clientId) {
+            query += ` AND al.client_id = ?`;
+            params.push(clientId);
+        }
+        
+        query += ` ORDER BY al.created_at DESC LIMIT ?`;
+        params.push(limit);
+        
+        const rows = await safeQuery(c, query, params);
+        return c.json(rows.map(r => ({ ...r, created_at: toISO(r.created_at) })));
+    } catch (e) { 
+        console.error('Sentinel Error:', e);
+        return c.json([]); 
+    }
+});
+
 app.get('/admin/clients/:id/audit-logs', async (c) => {
     try {
         const user = await getUserFromReq(c);
         if (!user || user.type !== 'admin') return c.json({ error: 'Accès refusé' }, 401);
-        const rows = await safeQuery(c, 'SELECT * FROM audit_logs WHERE target_user_id = ? ORDER BY created_at DESC', [c.req.param('id')]);
+        const rows = await safeQuery(c, 'SELECT * FROM audit_logs WHERE client_id = ? OR target_user_id = ? ORDER BY created_at DESC', [c.req.param('id'), c.req.param('id')]);
         return c.json(rows.map(r => ({ ...r, created_at: toISO(r.created_at) })));
     } catch (e) { return c.json([]); }
 });
@@ -864,6 +1067,15 @@ app.post('/admin/clients/:id/impersonate', async (c) => {
         if (!user || user.type !== 'admin') return c.json({ error: 'Accès refusé' }, 401);
         const cl = await safeFirst(c, `SELECT ${clientCols} FROM clients WHERE id = ?`, [c.req.param('id')]);
         if (!cl) return c.json({ error: '404' }, 404);
+        
+        await insertAuditLog(c, {
+            action: 'IMPERSONATE',
+            category: LOG_CATEGORIES.SECURITY,
+            severity: LOG_SEVERITIES.WARNING,
+            clientId: cl.id,
+            newValue: `Impersonation du client: ${cl.name} (${cl.email})`
+        });
+
         const p = { id: cl.id, clientId: cl.id, name: cl.name, type: 'client', role: 'client', impersonatedBySuperAdmin: true };
         return c.json({ token: await sign(p, getSecret(c)), user: p });
     } catch (e) { return c.json({ error: 'Erreur' }, 500); }

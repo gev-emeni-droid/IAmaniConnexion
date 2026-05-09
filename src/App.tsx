@@ -66,6 +66,7 @@ import { PlanningTableView } from './components/Planning/PlanningTableView';
 import { SupportModal } from './components/Support/SupportModal';
 import { InfoModal } from './components/InfoModal';
 import { useTheme } from './hooks/useTheme';
+import { SentinelJournal } from './components/Admin/SentinelJournal';
 
 
 // --- Vue Événementiel (doit être à la racine, avant tout JSX) ---
@@ -327,6 +328,7 @@ const Layout = ({ children }: any) => {
                         <>
                             {!isCollapsed && <div className="mt-5 mb-1 px-3 text-[9px] font-bold text-slate-600 dark:text-gray-400 uppercase tracking-widest">Administration</div>}
                             <SidebarItem icon={Users} label="Gestion Clients" to="/admin/clients" active={window.location.pathname.startsWith('/admin/clients')} collapsed={isCollapsed} />
+                            <SidebarItem icon={ShieldAlert} label="Journal Sentinel" to="/admin/sentinel" active={window.location.pathname === '/admin/sentinel'} collapsed={isCollapsed} />
                             <Link
                                 to="/admin/support"
                                 className={`group flex items-center ${isCollapsed ? 'justify-center' : 'gap-2'} ${isCollapsed ? 'px-0 py-1.5' : 'px-3 py-2'} rounded-lg transition-all ${
@@ -2186,12 +2188,6 @@ const AdminClientDetailView = () => {
                         >
                             Staff
                         </button>
-                        <button
-                            onClick={() => setActiveTab('audit')}
-                            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${activeTab === 'audit' ? 'bg-white text-black' : 'text-gray-400 hover:text-white'}`}
-                        >
-                            Journal d'activité
-                        </button>
                     </div>
 
                     {activeTab === 'collaborators' && (
@@ -2395,44 +2391,6 @@ const AdminClientDetailView = () => {
                     </div>
                     )}
 
-                    {activeTab === 'audit' && (
-                    <div className="bg-[#111111] rounded-2xl p-8 border border-white/5">
-                        <div className="flex items-center justify-between mb-8">
-                            <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                                <ShieldCheck size={20} className="text-blue-400" />
-                                Journal d'activité
-                            </h2>
-                        </div>
-
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-left min-w-[840px]">
-                                <thead>
-                                    <tr className="text-xs font-bold text-gray-500 uppercase tracking-widest border-b border-white/5">
-                                        <th className="pb-4">Date</th>
-                                        <th className="pb-4">Action</th>
-                                        <th className="pb-4">Par</th>
-                                        <th className="pb-4">Cible</th>
-                                        <th className="pb-4">Ancienne valeur</th>
-                                        <th className="pb-4">Nouvelle valeur</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-white/5">
-                                    {auditLogs.length === 0 ? (
-                                        <tr><td colSpan={6} className="py-10 text-center text-gray-500">Aucune activité enregistrée.</td></tr>
-                                    ) : auditLogs.map((log: any) => (
-                                        <tr key={log.id}>
-                                            <td className="py-3 text-gray-400 text-sm">{new Date(log.created_at).toLocaleString()}</td>
-                                            <td className="py-3 text-white font-medium">{log.action}</td>
-                                            <td className="py-3 text-gray-300">{log.actor_name || log.user_id}</td>
-                                            <td className="py-3 text-gray-300">{log.target_name || log.target_user_id}</td>
-                                            <td className="py-3 text-gray-500 break-all">{log.old_value || '—'}</td>
-                                            <td className="py-3 text-gray-500 break-all">{log.new_value || '—'}</td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
                     )}
                 </div>
             </div>
@@ -3127,6 +3085,7 @@ const App = () => (
                             <Route path="/crm" element={<CRMModule />} />
                             <Route path="/factures" element={<FacturesModule />} />
                             <Route path="/employes" element={<PostesEmployesModule />} />
+                            <Route path="/admin/sentinel" element={<SentinelJournal />} />
                             <Route path="/admin/clients" element={<AdminClientsView />} />
                             <Route path="/admin/clients/:id" element={<AdminClientDetailView />} />
                             <Route path="/admin/support" element={<SupportAdminView />} />
