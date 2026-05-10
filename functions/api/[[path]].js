@@ -138,10 +138,13 @@ const mapClient = (row) => {
 
 const mapFacture = (row) => {
     if (!row) return row;
+    const total_ttc = Number(row.total_ttc || row.amount || 0);
     return { 
         ...row, 
         due_date: toISO(row.due_date), 
         created_at: toISO(row.created_at),
+        total_ttc,
+        amount: row.amount || total_ttc,
         payload_json: typeof row.payload_json === 'string' ? JSON.parse(row.payload_json || '{}') : (row.payload_json || {}),
         billing_snapshot: typeof row.billing_snapshot === 'string' ? JSON.parse(row.billing_snapshot || '{}') : (row.billing_snapshot || {})
     };
@@ -278,7 +281,7 @@ const insertAuditLog = async (c, params) => {
             params.category || LOG_CATEGORIES.GLOBAL,
             params.severity || 'info',
             params.oldValue || '',
-            params.newValue || 'Aucun détail disponible',
+            params.newValue || `Action système sur ${c.req.method} ${c.req.path}`,
             ip,
             ua
         ).run();
