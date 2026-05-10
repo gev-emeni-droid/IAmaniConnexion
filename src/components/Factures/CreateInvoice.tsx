@@ -248,7 +248,7 @@ const getCRMDisplayName = (contact: CRMContactSuggestion) => {
     return contact.company_name || contact.organizer_name || [contact.first_name, contact.last_name].filter(Boolean).join(' ').trim() || 'Client';
 };
 
-export const CreateInvoice = ({ onBack, onShowHistory, onInvoiceSaved, initialInvoice, autoPrintToken, autoDownloadToken }: CreateInvoiceProps & { autoDownloadToken?: number }) => {
+export const CreateInvoice = ({ onBack, onShowHistory, onInvoiceSaved, initialInvoice, autoPrintToken, autoDownloadToken, silentMode, onDownloadComplete }: CreateInvoiceProps & { autoDownloadToken?: number; silentMode?: boolean; onDownloadComplete?: () => void }) => {
     const { user } = useAuth();
     const [settings, setSettings] = React.useState<BillingSettings>({});
     const [catalog, setCatalog] = React.useState<CatalogItem[]>([]);
@@ -917,11 +917,192 @@ body { margin: 0; padding: 0; background: #ffffff; }
 
     React.useEffect(() => {
         if (!autoDownloadToken || !dataLoaded || !previewHasContent) return;
-        const timer = window.setTimeout(() => {
-            handleDownloadPdf().catch(console.error);
+        const timer = window.setTimeout(async () => {
+            try {
+                await handleDownloadPdf();
+            } catch (err) {
+                console.error('Auto-download failed:', err);
+            } finally {
+                onDownloadComplete?.();
+            }
         }, 500);
         return () => window.clearTimeout(timer);
-    }, [autoDownloadToken, handleDownloadPdf, dataLoaded, previewHasContent]);
+    }, [autoDownloadToken, handleDownloadPdf, dataLoaded, previewHasContent, onDownloadComplete]);
+
+    if (silentMode) {
+        return (
+            <div className="sr-only opacity-0 pointer-events-none fixed inset-0 z-[-1] overflow-hidden" style={{ width: '210mm' }}>
+                 <div
+                    ref={printAreaRef}
+                    className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-2xl overflow-hidden shadow-2xl flex flex-col"
+                    style={{ width: '210mm', minHeight: '291mm', padding: '10mm', boxSizing: 'border-box' }}
+                >
+                    {/* On réutilise exactement le même bloc d'aperçu que dans le mode normal */}
+                    <div className="flex justify-between items-start mb-8">
+                        <div>
+                            <div
+                                className="text-2xl font-black mb-2 tracking-tighter"
+                                style={{ color: accentColor, fontFamily: 'Arial Black, Inter, Arial, Helvetica, sans-serif' }}
+                            >
+                                {settings.company_name || user?.company_name || user?.name || 'VOTRE ÉTABLISSEMENT'}
+                            </div>
+                            <div className="text-slate-600 text-xs mt-1 leading-snug">
+                                <p>{settings.address || '-'}</p>
+                                <p>{[settings.postal_code, settings.city].filter(Boolean).join(' ') || '-'}</p>
+                            </div>
+                            {settings.phone && (
+                                <p className="mt-1 text-xs text-slate-600 font-medium tracking-tight">Tél : {settings.phone}</p>
+                            )}
+                        </div>
+
+                        <div className="text-right shrink-0">
+                            <h2
+                                className="text-[32px] font-black uppercase mb-2 leading-none tracking-[-0.035em] print:text-[32px]"
+                                style={{
+                                    color: accentColor,
+                                    fontFamily: 'Arial Black, Inter, Arial, Helvetica, sans-serif',
+                                    fontWeight: 900,
+                                }}
+                            >
+                                FACTURE
+                            </h2>
+                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 inline-block text-left min-w-[190px] shadow-sm">
+                                <div className="mb-2">
+                                    <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Numéro de facture</p>
+                                    <p className="font-mono text-base font-bold text-slate-900">{invoiceNumber || 'F-XXXXXX'}</p>
+                                </div>
+                                <div className={`grid ${settings.enable_cover_count ? 'grid-cols-2' : 'grid-cols-1'} gap-3 pt-2 border-t border-slate-200/60`}>
+                                    <div>
+                                        <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Date</p>
+                                        <p className="font-bold text-slate-900 text-xs">{toDisplayDate(invoiceDate)}</p>
+                                    </div>
+                                    {settings.enable_cover_count && (
+                                        <div>
+                                            <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Couverts</p>
+                                            <p className="font-bold text-slate-900 text-xs">{coverCount || '-'}</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {(clientName || clientAddress || clientCity || clientPostalCode) && (
+                        <div className="invoice-keep-together mb-6 flex justify-end">
+                            <div className="w-full md:w-1/2 p-4 rounded-xl border-2 border-slate-50 bg-white shadow-sm">
+                                <h3 className="text-[9px] font-black uppercase tracking-widest mb-2" style={{ color: accentColor, opacity: 0.7 }}>Destinataire</h3>
+                                <p className="font-bold text-lg text-slate-900 mb-0.5">{clientName || '-'}</p>
+                                <div className="text-slate-600 text-xs whitespace-pre-line leading-relaxed">
+                                    <p>{clientAddress || '-'}</p>
+                                    <p>{[clientPostalCode, clientCity, clientCountry].filter(Boolean).join(' ') || '-'}</p>
+                                    {settings.enable_cover_count && <p className="mt-1 font-semibold">Nombre de couverts : {coverCount || '-'}</p>}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    <table className="invoice-items-table w-full mb-6 border-collapse">
+                        <thead>
+                            <tr className="border-b border-slate-900 text-left">
+                                <th className="pb-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">Désignation de la prestation</th>
+                                {displayTvaRates.map((rate) => (
+                                    <th key={rate} className="pb-2 pl-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Base HT ({rate}%)</th>
+                                ))}
+                                <th className="pb-2 pl-6 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Total HT</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {previewHasContent ? (
+                                lineSummaries.map((line) => (
+                                    <tr key={line.id} className="invoice-line-row group">
+                                        <td className="py-4 align-top">
+                                            <p className="font-bold text-slate-800 text-lg">{line.label || 'Prestation non renseignée'}</p>
+                                            <p className="text-[9px] text-slate-400 uppercase font-bold mt-0.5 tracking-wider">
+                                                {line.quantity} quantité{line.quantity > 1 ? 's' : ''}{settings.enable_cover_count && coverCount ? ` • ${coverCount} couverts` : ''}
+                                            </p>
+                                        </td>
+                                        {displayTvaRates.map((rate) => {
+                                            const detail = line.rateDetails.find((d) => d.rate === rate);
+                                            return (
+                                                <td key={rate} className="py-4 pl-4 text-right text-slate-700 font-medium text-sm align-top">
+                                                    {detail && detail.ht > 0 ? toCurrency(detail.ht) : '-'}
+                                                </td>
+                                            );
+                                        })}
+                                        <td className="py-4 pl-6 text-right font-black text-slate-900 text-lg align-top">
+                                            {toCurrency(line.totalHt)}
+                                        </td>
+                                    </tr>
+                                ))
+                            ) : null}
+                        </tbody>
+                    </table>
+
+                    <div className="invoice-bottom-block mt-auto">
+                        <div className="invoice-summary-section flex justify-end mb-4">
+                            <div className="w-[320px] bg-slate-50 p-5 rounded-2xl border border-slate-100 space-y-3 shadow-sm">
+                                <div className="flex justify-between text-xs text-slate-500 font-medium">
+                                    <span>Sous-total Hors Taxes :</span>
+                                    <span className="text-slate-900">{toCurrency(totalHt)}</span>
+                                </div>
+                                <div className="space-y-1 pt-2 border-t border-slate-200/60">
+                                    {displayTvaRates.map((rate) => {
+                                        const rateTotal = lineSummaries.reduce((sum, line) => {
+                                            const detail = line.rateDetails.find((d) => d.rate === rate);
+                                            return sum + (detail?.tva || 0);
+                                        }, 0);
+                                        if (rateTotal <= 0) return null;
+                                        return (
+                                            <div key={rate} className="flex justify-between text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                                                <span>TVA collectée ({rate}%) :</span>
+                                                <span className="text-slate-600">{toCurrency(rateTotal)}</span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                                <div className="flex justify-between text-slate-600 text-[10px] font-black uppercase tracking-tight pt-1">
+                                    <span>Total TVA cumulé :</span>
+                                    <span>{toCurrency(totalTva)}</span>
+                                </div>
+                                <div className="flex justify-between text-slate-600 text-[10px] font-black uppercase tracking-tight pt-1 border-t border-slate-200/60">
+                                    <span>Total TTC :</span>
+                                    <span>{toCurrency(totalTtcBrut)}</span>
+                                </div>
+                                {alreadyPaidValue > 0 && (
+                                    <div className="flex justify-between text-slate-600 text-[10px] font-black uppercase tracking-tight pt-1">
+                                        <span>Déjà réglé :</span>
+                                        <span>- {toCurrency(alreadyPaidValue)}</span>
+                                    </div>
+                                )}
+                                <div className="pt-4 border-t-2 flex justify-between items-baseline" style={{ borderColor: accentColor, borderTopStyle: 'solid', borderTopWidth: '2px', opacity: 1 }}>
+                                    <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: accentColor, opacity: 0.7 }}>Net à payer TTC</span>
+                                    <span className="text-2xl font-black" style={{ color: accentColor }}>{toCurrency(netToPay)}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="invoice-legal-footer pt-4 border-t border-slate-100 text-center">
+                            <div className="space-y-1 opacity-80">
+                                <p className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] mb-1">
+                                    {settings.company_name || user?.company_name || user?.name || 'Votre établissement'}
+                                </p>
+                                <div className="text-[8px] text-slate-400 leading-relaxed font-medium flex flex-wrap justify-center gap-x-2 gap-y-0.5 uppercase tracking-wide">
+                                    {settings.rcs_ville && settings.rcs_numero && <span>{`RCS ${settings.rcs_ville} ${settings.rcs_numero}`}</span>}
+                                    {settings.siret && <span>• SIRET {settings.siret}</span>}
+                                    {settings.tva && <span>• TVA {settings.tva}</span>}
+                                    {settings.ape && <span>• Code APE {settings.ape}</span>}
+                                </div>
+                                <div className="text-[8px] text-slate-400 leading-relaxed font-medium flex flex-wrap justify-center gap-x-2 gap-y-0.5 uppercase tracking-wide">
+                                    {settings.capital && <span>Capital social : {settings.capital}</span>}
+                                    {settings.siege_social && <span>• {settings.siege_social}</span>}
+                                    {!settings.siege_social && (settings.address || settings.city) && <span>• {[settings.address, settings.postal_code, settings.city].filter(Boolean).join(' ')}</span>}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-6">
