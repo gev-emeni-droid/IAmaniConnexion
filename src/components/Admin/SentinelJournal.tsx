@@ -98,11 +98,29 @@ export const SentinelJournal = () => {
     }, []);
 
     useEffect(() => {
-        loadLogs();
+        let mounted = true;
+        const controller = new AbortController();
+
+        const doLoad = async () => {
+            if (!mounted) return;
+            await loadLogs();
+        };
+
+        doLoad();
+
         if (autoRefresh) {
-            const timer = setInterval(loadLogs, 10000);
-            return () => clearInterval(timer);
+            // 45s is plenty for a monitoring journal — avoids console spam
+            const timer = setInterval(doLoad, 45000);
+            return () => {
+                mounted = false;
+                controller.abort();
+                clearInterval(timer);
+            };
         }
+        return () => {
+            mounted = false;
+            controller.abort();
+        };
     }, [activeCategory, selectedClientId, autoRefresh]);
 
     const loadClients = async () => {
@@ -118,7 +136,10 @@ export const SentinelJournal = () => {
         try {
             const data = await adminApi.getSentinelLogs(activeCategory === 'GLOBAL' ? '' : activeCategory, selectedClientId);
             setLogs(data);
-        } catch (e) {
+        } catch (e: any) {
+            // Silently ignore AbortError (navigation / cleanup)
+            if (e?.name === 'AbortError' || e instanceof DOMException) return;
+            // Only log genuine failures
             console.error('Failed to load logs', e);
         } finally {
             setLoading(false);

@@ -227,6 +227,8 @@ const Layout = ({ children }: any) => {
     React.useEffect(() => {
         if (!user) return;
         let mounted = true;
+        const controller = new AbortController();
+
         const loadUnread = async () => {
             try {
                 if (user.type === 'admin') {
@@ -236,12 +238,17 @@ const Layout = ({ children }: any) => {
                     const data = await supportApi.getClientUnreadCount();
                     if (mounted) setClientSupportUnreadCount(Number(data?.count || 0));
                 }
-            } catch {}
+            } catch (e: any) {
+                // Silently ignore AbortError — it's expected on cleanup/navigation
+                if (e?.name === 'AbortError' || e instanceof DOMException) return;
+            }
         };
         loadUnread();
-        const timer = setInterval(loadUnread, 15000);
+        // 60s interval — checking every minute is more than sufficient for unread count
+        const timer = setInterval(loadUnread, 60000);
         return () => {
             mounted = false;
+            controller.abort();
             clearInterval(timer);
         };
     }, [user]);

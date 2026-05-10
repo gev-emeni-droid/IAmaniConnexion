@@ -119,8 +119,15 @@ export async function apiFetch(endpoint: string, options: ApiFetchOptions = {}, 
             return await executeFetch();
         } catch (error: any) {
             lastError = error;
+
+            // AbortError = intentional cancellation (navigation, cleanup, timeout on polling)
+            // Never retry, never log — just rethrow silently
+            if (error?.name === 'AbortError' || error instanceof DOMException) {
+                throw error;
+            }
+
             // Only retry on network errors or 5xx. Don't retry on 4xx (except maybe 429)
-            const isNetworkError = error instanceof TypeError || error.name === 'AbortError' || !error.status;
+            const isNetworkError = error instanceof TypeError || !error.status;
             const isRetryableStatus = error.status >= 500 || error.status === 429;
             
             if (i < retryCount && (isNetworkError || isRetryableStatus)) {
@@ -133,10 +140,11 @@ export async function apiFetch(endpoint: string, options: ApiFetchOptions = {}, 
         }
     }
 
-    if (lastError.name === 'AbortError') {
-        throw new Error('La requête a expiré (timeout)');
+    if (lastError?.name === 'AbortError' || lastError instanceof DOMException) {
+        // Propagate silently — caller's useEffect cleanup will ignore it
+        throw lastError;
     }
-    throw new Error(lastError.message || lastError.toString() || 'Erreur réseau');
+    throw new Error(lastError?.message || lastError?.toString() || 'Erreur réseau');
 }
 
 export const authApi = {
