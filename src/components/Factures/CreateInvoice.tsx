@@ -276,6 +276,7 @@ export const CreateInvoice = ({ onBack, onShowHistory, onInvoiceSaved, initialIn
     const [sendingEmail, setSendingEmail] = React.useState(false);
     const [pendingEmailInvoiceId, setPendingEmailInvoiceId] = React.useState('');
     const [accentColor, setAccentColor] = React.useState(DEFAULT_ACCENT_COLOR);
+    const [dataLoaded, setDataLoaded] = React.useState(false);
     const printAreaRef = React.useRef<HTMLDivElement | null>(null);
     const skipNextCrmSearchRef = React.useRef(false);
 
@@ -326,6 +327,7 @@ export const CreateInvoice = ({ onBack, onShowHistory, onInvoiceSaved, initialIn
                 }
                 return normalized;
             });
+            setDataLoaded(true);
         } catch (e) {
             console.error(e);
         }
@@ -527,8 +529,10 @@ export const CreateInvoice = ({ onBack, onShowHistory, onInvoiceSaved, initialIn
                 }, payloadRates))
                 : [buildEmptyLine(payloadRates, catalog[0]?.label || '')];
             setLines(restoredLines);
+            setDataLoaded(true);
         } catch (e) {
             console.error(e);
+            setDataLoaded(true);
         }
     }, [initialInvoice]);
 
@@ -593,10 +597,10 @@ body { margin: 0; padding: 0; background: #ffffff; }
     }, [invoiceNumber]);
 
     React.useEffect(() => {
-        if (!autoPrintToken) return;
-        const timer = window.setTimeout(() => openPrintWindow(), 250);
+        if (!autoPrintToken || !dataLoaded) return;
+        const timer = window.setTimeout(() => openPrintWindow(), 500);
         return () => window.clearTimeout(timer);
-    }, [autoPrintToken, openPrintWindow]);
+    }, [autoPrintToken, openPrintWindow, dataLoaded]);
 
     const buildInvoicePayload = React.useCallback(() => {
         const invoiceId = currentInvoiceId || (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : createLineId());
@@ -792,6 +796,11 @@ body { margin: 0; padding: 0; background: #ffffff; }
     };
 
     const handleDownloadPdf = async () => {
+        if (!previewHasContent) {
+            alert('La facture est vide. Veuillez saisir des montants avant de télécharger.');
+            return;
+        }
+
         const saved = await saveCurrentInvoice();
         if (!saved) return;
 
