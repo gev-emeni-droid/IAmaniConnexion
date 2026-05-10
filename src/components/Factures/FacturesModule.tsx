@@ -145,6 +145,7 @@ export const FacturesModule = () => {
 
             {backgroundInvoice && (
                 <CreateInvoice 
+                    key={`bg-invoice-${backgroundInvoice.id}-${bgDownloadToken}`}
                     initialInvoice={backgroundInvoice}
                     autoDownloadToken={bgDownloadToken}
                     silentMode={true}
