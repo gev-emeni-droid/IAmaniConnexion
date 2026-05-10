@@ -3,6 +3,8 @@ import { handle } from 'hono/cloudflare-pages';
 import { cors } from 'hono/cors';
 import { sign, verify, decode } from 'hono/jwt';
 import { compareSync, hashSync } from 'bcryptjs';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 export const app = new Hono().basePath('/api');
 app.use('*', cors());
@@ -2587,11 +2589,252 @@ app.get('/facture', async (c) => {
         const user = await getUserFromReq(c);
         if (!user) return c.json([]);
         const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
+        const isSuperAdmin = user.type === 'admin' && (user.role === 'superadmin' || user.email === 'gev-emeni@outlook.fr');
+
+        const id = c.req.query('id');
+        if (id) {
+            const invoice = await safeFirst(c, `SELECT * FROM facture WHERE id = ?`, [id]);
+            if (!invoice) return c.json({ error: 'Facture introuvable' }, 404);
+
+            if (!isSuperAdmin && invoice.client_id !== ownerId) {
+                return c.json({ error: 'Accès refusé' }, 403);
+            }
+
+            const hexToRgb = (hex) => {
+                const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+                return result ? [parseInt(result[1], 16), parseInt(result[2], 16), parseInt(result[3], 16)] : [0, 0, 0];
+            };
+
+            const payload = typeof invoice.payload_json === 'string' ? JSON.parse(invoice.payload_json || '{}') : (invoice.payload_json || {});
+            const snapshot = typeof invoice.billing_snapshot === 'string' ? JSON.parse(invoice.billing_snapshot || '{}') : (invoice.billing_snapshot || {});
+
+            const doc = new jsPDF({
+                orientation: 'portrait',
+                unit: 'mm',
+                format: 'a4'
+            });
+
+            // Original Colors & Settings
+            const accentColor = snapshot.primary_color || '#2f9e9e';
+            const companyName = snapshot.company_name || 'Nom de l’établissement';
+            const fmt = (val) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(val || 0);
+            
+            // --- 1. HEADER (Margins approx 14mm) ---
+            // Company Info (Left)
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(14); // text-xl
+            doc.setTextColor(30, 41, 59); // slate-800
+            doc.text(companyName, 14, 20);
+            
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(9); // text-xs
+            doc.setTextColor(71, 85, 105); // slate-600
+            doc.text(snapshot.address || '-', 14, 25);
+            doc.text(`${snapshot.postal_code || ''} ${snapshot.city || ''}`.trim() || '-', 14, 29);
+            if (snapshot.phone) {
+                doc.setFontSize(9);
+                doc.setFont('helvetica', 'bold');
+                doc.text(`Tél : ${snapshot.phone}`, 14, 34);
+            }
+
+            // Title "FACTURE" (Right)
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(32); // text-[32px]
+            doc.setTextColor(accentColor);
+            doc.text('FACTURE', 196, 24, { align: 'right' });
+
+            // Info Box (Right)
+            doc.setDrawColor(241, 245, 249); // border-slate-100
+            doc.setFillColor(248, 250, 252); // bg-slate-50
+            doc.roundedRect(130, 30, 66, 25, 3, 3, 'FD');
+            
+            doc.setFontSize(7);
+            doc.setTextColor(148, 163, 184); // slate-400
+            doc.setFont('helvetica', 'bold');
+            doc.text('NUMÉRO DE FACTURE', 135, 36);
+            doc.setFontSize(11); // text-base
+            doc.setTextColor(15, 23, 42); // slate-900
+            doc.text(invoice.invoice_number || 'F-XXXXXX', 135, 42);
+            
+            doc.setDrawColor(226, 232, 240); // border-slate-200/60
+            doc.line(135, 45, 190, 45);
+            
+            doc.setFontSize(7);
+            doc.setTextColor(148, 163, 184);
+            doc.text('DATE', 135, 49);
+            doc.setFontSize(9);
+            doc.setTextColor(15, 23, 42);
+            const dateStr = new Date(invoice.due_date || invoice.created_at).toLocaleDateString('fr-FR');
+            doc.text(dateStr, 135, 53);
+
+            // --- 2. DESTINATAIRE (Right align block) ---
+            if (invoice.customer_name) {
+                const destY = 70;
+                doc.setDrawColor(248, 250, 252); // border-slate-50
+                doc.setFillColor(255, 255, 255);
+                doc.roundedRect(110, destY, 86, 32, 3, 3, 'FD');
+                
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(8);
+                doc.setTextColor(accentColor);
+                doc.text('DESTINATAIRE', 115, destY + 6);
+                
+                doc.setFontSize(14); // text-lg
+                doc.setTextColor(15, 23, 42);
+                doc.text(invoice.customer_name, 115, destY + 14);
+                
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(10); // text-xs
+                doc.setTextColor(71, 85, 105);
+                const addr = payload.clientAddress || '-';
+                const city = `${payload.clientPostalCode || ''} ${payload.clientCity || ''} ${payload.clientCountry || ''}`.trim() || '-';
+                doc.text(addr, 115, destY + 20);
+                doc.text(city, 115, destY + 26);
+            }
+
+            // --- 3. TABLE ---
+            const tvaRates = snapshot.tva_rates || [20];
+            const activeTvaRates = tvaRates.filter(r => (payload.lines || []).some(l => l.ttcByRate && l.ttcByRate[r] > 0));
+            const displayRates = activeTvaRates.length > 0 ? activeTvaRates : [tvaRates[0]];
+
+            const tableRows = (payload.lines || []).map(line => {
+                const row = [
+                    { content: line.label || 'Prestation', styles: { fontStyle: 'bold', fontSize: 13, textColor: [30, 41, 59] } }
+                ];
+                displayRates.forEach(rate => {
+                    const ttc = Number(line.ttcByRate?.[rate] || 0);
+                    const ht = ttc / (1 + rate / 100);
+                    row.push(ht > 0 ? fmt(ht) : '-');
+                });
+                const totalLineTtc = Object.values(line.ttcByRate || {}).reduce((a, b) => Number(a) + Number(b), 0);
+                const totalLineHt = totalLineTtc / (1 + (displayRates[0] || 20) / 100); // Simplified HT total
+                row.push(fmt(totalLineHt));
+                return row;
+            });
+
+            autoTable(doc, {
+                startY: 110,
+                head: [[
+                    { content: 'Désignation de la prestation', styles: { halign: 'left' } }, 
+                    ...displayRates.map(r => ({ content: `Base HT (${r}%)`, styles: { halign: 'right' } })), 
+                    { content: 'Total HT', styles: { halign: 'right' } }
+                ]],
+                body: tableRows,
+                theme: 'plain',
+                headStyles: { 
+                    textColor: [148, 163, 184], // slate-400
+                    fontSize: 8, 
+                    fontStyle: 'bold',
+                    cellPadding: { bottom: 3 },
+                    lineWidth: { bottom: 0.5 },
+                    lineColor: { bottom: [15, 23, 42] } // slate-900
+                },
+                styles: { fontSize: 10, cellPadding: 5, textColor: [71, 85, 105] }, // slate-600
+                columnStyles: {
+                    0: { cellWidth: 'auto' },
+                    [displayRates.length + 1]: { halign: 'right', fontStyle: 'bold', fontSize: 13, textColor: [15, 23, 42] }
+                },
+                didDrawCell: (data) => {
+                    if (data.section === 'body' && data.column.index === 0) {
+                        // Subtitle: Quantity info
+                        const line = payload.lines[data.row.index];
+                        if (line) {
+                            doc.setFontSize(7);
+                            doc.setTextColor(148, 163, 184);
+                            doc.setFont('helvetica', 'bold');
+                            const qStr = `${line.quantity} quantité${line.quantity > 1 ? 's' : ''}`;
+                            doc.text(qStr.toUpperCase(), data.cell.x + 5, data.cell.y + data.cell.height - 2);
+                        }
+                    }
+                }
+            });
+
+            // --- 4. TOTALS (Summary Box) ---
+            let finalY = doc.lastAutoTable.finalY + 10;
+            if (finalY > 230) { doc.addPage(); finalY = 20; }
+
+            doc.setFillColor(248, 250, 252); // slate-50
+            doc.setDrawColor(241, 245, 249); // border-slate-100
+            doc.roundedRect(120, finalY, 76, 50, 4, 4, 'FD');
+            
+            doc.setFontSize(8);
+            doc.setTextColor(100, 116, 139); // slate-500
+            doc.text('Sous-total Hors Taxes :', 125, finalY + 8);
+            doc.setTextColor(15, 23, 42);
+            doc.text(fmt(invoice.total_ht), 191, finalY + 8, { align: 'right' });
+            
+            doc.setDrawColor(226, 232, 240);
+            doc.line(125, finalY + 12, 191, finalY + 12);
+            
+            let tvaY = finalY + 18;
+            displayRates.forEach(rate => {
+                const ttc = (payload.lines || []).reduce((sum, l) => sum + Number(l.ttcByRate?.[rate] || 0), 0);
+                const ht = ttc / (1 + rate / 100);
+                const tva = ttc - ht;
+                if (tva > 0) {
+                    doc.setFontSize(7);
+                    doc.setTextColor(148, 163, 184);
+                    doc.text(`TVA collectée (${rate}%) :`, 125, tvaY);
+                    doc.setTextColor(71, 85, 105);
+                    doc.text(fmt(tva), 191, tvaY, { align: 'right' });
+                    tvaY += 4;
+                }
+            });
+
+            doc.setFontSize(8);
+            doc.setTextColor(71, 85, 105);
+            doc.text('Total TTC :', 125, finalY + 32);
+            doc.text(fmt(invoice.total_ttc), 191, finalY + 32, { align: 'right' });
+
+            doc.setDrawColor(hexToRgb(accentColor)[0], hexToRgb(accentColor)[1], hexToRgb(accentColor)[2]);
+            doc.setLineWidth(0.6);
+            doc.line(125, finalY + 36, 191, finalY + 36);
+
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(8);
+            doc.setTextColor(accentColor);
+            doc.text('NET À PAYER TTC', 125, finalY + 42);
+            doc.setFontSize(18);
+            doc.text(fmt(invoice.remaining_due || invoice.total_ttc - (invoice.already_paid || 0)), 191, finalY + 42, { align: 'right' });
+
+            // --- 5. LEGAL FOOTER ---
+            const pageCount = doc.internal.getNumberOfPages();
+            for (let i = 1; i <= pageCount; i++) {
+                doc.setPage(i);
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(9);
+                doc.setTextColor(100, 116, 139);
+                doc.text(companyName.toUpperCase(), 105, 280, { align: 'center', charSpace: 0.5 });
+                
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(7);
+                doc.setTextColor(148, 163, 184);
+                const legal = [];
+                if (snapshot.rcs_ville && snapshot.rcs_numero) legal.push(`RCS ${snapshot.rcs_ville} ${snapshot.rcs_numero}`);
+                if (snapshot.siret) legal.push(`SIRET ${snapshot.siret}`);
+                if (snapshot.tva) legal.push(`TVA ${snapshot.tva}`);
+                if (snapshot.ape) legal.push(`Code APE ${snapshot.ape}`);
+                doc.text(legal.join(' • '), 105, 285, { align: 'center' });
+                
+                const legal2 = [];
+                if (snapshot.capital) legal2.push(`Capital social : ${snapshot.capital}`);
+                if (snapshot.siege_social) legal2.push(snapshot.siege_social);
+                else if (snapshot.address) legal2.push(snapshot.address);
+                doc.text(legal2.join(' • '), 105, 289, { align: 'center' });
+            }
+
+            const pdfOutput = doc.output('arraybuffer');
+            return c.body(pdfOutput, 200, {
+                'Content-Type': 'application/pdf',
+                'Content-Disposition': `attachment; filename="Facture_${invoice.invoice_number || invoice.id}.pdf"`
+            });
+        }
+
         const rows = await safeQuery(c, `SELECT ${factureCols} FROM facture WHERE client_id = ? ORDER BY created_at DESC`, [ownerId]);
         return c.json(rows.map(mapFacture) || []);
     } catch (e) {
         console.error('GET Factures Route Error:', e);
-        return c.json([]);
+        return c.json({ error: e.message }, 500);
     }
 });
 

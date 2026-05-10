@@ -1,24 +1,26 @@
 import React from 'react';
-import { ArrowLeft, Download, Eye, History, Trash2 } from 'lucide-react';
+import { ArrowLeft, Download, Eye, History, Loader2, Trash2 } from 'lucide-react';
 import { moduleApi } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
+import { generateInvoicePdfFromData } from './invoicePdfGenerator';
+import { resolveLogoUrl } from '../../lib/resolveLogoUrl';
 
 interface InvoiceHistoryProps {
     refreshKey?: number;
     onBack: () => void;
     onOpenInvoice: (invoice: any) => void;
-    onDownloadInvoice: (invoice: any) => void;
 }
 
 
 const toCurrency = (value: number) =>
     new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(Number.isFinite(value) ? value : 0);
 
-export const InvoiceHistory = ({ refreshKey = 0, onBack, onOpenInvoice, onDownloadInvoice }: InvoiceHistoryProps) => {
+export const InvoiceHistory = ({ refreshKey = 0, onBack, onOpenInvoice }: InvoiceHistoryProps) => {
     const { user } = useAuth();
     const [items, setItems] = React.useState<any[]>([]);
     const [loading, setLoading] = React.useState(true);
     const [deletingId, setDeletingId] = React.useState<string | null>(null);
+    const [downloadingId, setDownloadingId] = React.useState<string | null>(null);
 
     const isSuperAdminSession = Boolean(
         (user?.type === 'admin' && user?.email?.toLowerCase() === 'gev-emeni@outlook.fr') ||
@@ -116,10 +118,51 @@ export const InvoiceHistory = ({ refreshKey = 0, onBack, onOpenInvoice, onDownlo
                                             </button>
                                             <button
                                                 type="button"
-                                                onClick={() => onDownloadInvoice(item)}
-                                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#2f9e9e] text-white text-xs font-bold hover:opacity-90 transition-opacity"
+                                                disabled={downloadingId === String(item.id)}
+                                                onClick={async () => {
+                                                    setDownloadingId(String(item.id));
+                                                    try {
+                                                        // mapFacture already parses these — use directly, no re-parse
+                                                        const payload = (item.payload_json && typeof item.payload_json === 'object')
+                                                            ? item.payload_json
+                                                            : (() => { try { return JSON.parse(item.payload_json || '{}'); } catch { return {}; } })();
+
+                                                        let snapshot = (item.billing_snapshot && typeof item.billing_snapshot === 'object')
+                                                            ? item.billing_snapshot
+                                                            : (() => { try { return JSON.parse(item.billing_snapshot || '{}'); } catch { return {}; } })();
+
+                                                        // Fallback: if snapshot has no company name, fetch fresh billing settings
+                                                        if (!snapshot?.company_name) {
+                                                            try {
+                                                                const fresh = await moduleApi.getBillingSettings();
+                                                                if (fresh?.company_name) snapshot = { ...fresh, ...snapshot };
+                                                            } catch { /* ignore */ }
+                                                        }
+
+                                                        // Resolve logo URL to absolute for iframe rendering
+                                                        if (snapshot?.logo_url) {
+                                                            snapshot = { ...snapshot, logo_url: resolveLogoUrl(snapshot.logo_url) };
+                                                        }
+
+                                                        const { pdf } = await generateInvoicePdfFromData({
+                                                            invoice: item,
+                                                            payload,
+                                                            snapshot,
+                                                        });
+                                                        pdf.save(`Facture_${item.invoice_number || item.id}.pdf`);
+                                                    } catch (e: any) {
+                                                        console.error('Download error:', e);
+                                                        alert(e.message || 'Impossible de générer le PDF.');
+                                                    } finally {
+                                                        setDownloadingId(null);
+                                                    }
+                                                }}
+                                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#2f9e9e] text-white text-xs font-bold hover:opacity-90 transition-opacity disabled:opacity-60"
                                             >
-                                                <Download size={13} /> Télécharger
+                                                {downloadingId === String(item.id)
+                                                    ? <><Loader2 size={13} className="animate-spin" /> Génération...</>
+                                                    : <><Download size={13} /> Télécharger</>
+                                                }
                                             </button>
                                             {isSuperAdminSession && (
                                                 <button

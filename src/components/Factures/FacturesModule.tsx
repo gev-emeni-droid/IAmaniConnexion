@@ -12,8 +12,6 @@ export const FacturesModule = () => {
     const [autoDownloadToken, setAutoDownloadToken] = React.useState(0);
     const [showInfoModal, setShowInfoModal] = React.useState(true);
     const [previewInvoice, setPreviewInvoice] = React.useState<any>(null);
-    const [backgroundInvoice, setBackgroundInvoice] = React.useState<any>(null);
-    const [bgDownloadToken, setBgDownloadToken] = React.useState(0);
 
     const renderContent = () => {
         if (view === 'history') {
@@ -23,10 +21,6 @@ export const FacturesModule = () => {
                     onBack={() => setView('create')}
                     onOpenInvoice={(invoice) => {
                         setPreviewInvoice(invoice);
-                    }}
-                    onDownloadInvoice={(invoice) => {
-                        setBackgroundInvoice(invoice);
-                        setBgDownloadToken(Date.now());
                     }}
                 />
             );
@@ -143,18 +137,6 @@ export const FacturesModule = () => {
                 </div>
             )}
 
-            {backgroundInvoice && (
-                <CreateInvoice 
-                    key={`bg-invoice-${backgroundInvoice.id}-${bgDownloadToken}`}
-                    initialInvoice={backgroundInvoice}
-                    autoDownloadToken={bgDownloadToken}
-                    silentMode={true}
-                    onDownloadComplete={() => {
-                        setBackgroundInvoice(null);
-                        setBgDownloadToken(0);
-                    }}
-                />
-            )}
         </>
     );
 };
