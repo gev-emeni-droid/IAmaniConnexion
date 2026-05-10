@@ -8,23 +8,25 @@ export const app = new Hono().basePath('/api');
 app.use('*', cors());
 
 app.onError(async (err, c) => {
-    console.error('GLOBAL ERROR:', err);
+    const route = `${c.req.method} ${c.req.path}`;
+    console.error(`[CRITICAL ERROR] ${route}:`, err);
     
-    // Log System Error to Sentinel
+    // Log System Error to Sentinel (French & Descriptive)
     try {
-        await ensureAuditLogsSchema(c);
         await insertAuditLog(c, {
-            action: 'SYSTEM_ERROR',
+            action: 'ERREUR_SYSTEME',
             category: LOG_CATEGORIES.SYSTEM,
             severity: LOG_SEVERITIES.ALERT,
-            newValue: `Erreur système 500 sur la route ${c.req.path}. Message: ${err.message}`
+            newValue: `Le serveur a rencontré une erreur 500 sur la route ${route}. Détail : ${err.message}`
         });
-    } catch (logErr) {}
+    } catch (logErr) {
+        console.error('Failed to log error to Sentinel:', logErr.message);
+    }
 
     return c.json({
-        error: `Erreur Globale: ${err?.message || 'Erreur inconnue'}`,
-        path: c.req.path,
-        stack: err?.stack?.slice(0, 500) // Limited stack for debugging
+        error: "Une erreur système s'est produite",
+        message: err?.message,
+        path: c.req.path
     }, 500);
 });
 
@@ -134,7 +136,16 @@ const mapClient = (row) => {
     };
 };
 
-const mapFacture = (row) => ({ ...row, due_date: toISO(row.due_date), created_at: toISO(row.created_at) });
+const mapFacture = (row) => {
+    if (!row) return row;
+    return { 
+        ...row, 
+        due_date: toISO(row.due_date), 
+        created_at: toISO(row.created_at),
+        payload_json: typeof row.payload_json === 'string' ? JSON.parse(row.payload_json || '{}') : (row.payload_json || {}),
+        billing_snapshot: typeof row.billing_snapshot === 'string' ? JSON.parse(row.billing_snapshot || '{}') : (row.billing_snapshot || {})
+    };
+};
 const mapEvent = (row) => ({ ...row, created_at: toISO(row.created_at), documents: typeof row.documents === 'string' ? JSON.parse(row.documents || '[]') : (row.documents || []) });
 const mapCrm = (row) => {
     let phone = row.phone;
@@ -2713,7 +2724,8 @@ app.post('/facture/:id/send-email', async (c) => {
         });
 
         if (emailRes.success) {
-            await c.env.DB.prepare('UPDATE facture SET last_sent_at = CURRENT_TIMESTAMP, last_sent_email = ? WHERE id = ?').bind(body.to, id).run();
+            // Colonnes last_sent_at/email temporairement désactivées pour éviter l'erreur 500 (manquantes en base)
+            // await c.env.DB.prepare('UPDATE facture SET last_sent_at = CURRENT_TIMESTAMP, last_sent_email = ? WHERE id = ?').bind(body.to, id).run();
             
             await insertAuditLog(c, {
                 action: 'SEND_INVOICE_EMAIL',
