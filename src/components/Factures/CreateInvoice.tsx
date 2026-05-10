@@ -507,9 +507,12 @@ export const CreateInvoice = ({ onBack, onShowHistory, onInvoiceSaved, initialIn
                 setSettings((prev) => ({ ...prev, ...snapshot }));
             }
             const payloadRates = Array.isArray(snapshot?.tva_rates) && snapshot.tva_rates.length > 0 ? snapshot.tva_rates.map(Number) : tvaRates;
+            const dbAmount = Number(initialInvoice.total_ttc || initialInvoice.amount || 0);
+            const dbPaid = Number(initialInvoice.already_paid || 0);
+
             setCurrentInvoiceId(String(initialInvoice.id || parsedPayload.id || ''));
             setInvoiceNumber(String(parsedPayload.invoiceNumber || initialInvoice.invoice_number || ''));
-            setInvoiceDate(String(parsedPayload.invoiceDate || initialInvoice.due_date || toInputDate()));
+            setInvoiceDate(String(parsedPayload.invoiceDate || initialInvoice.due_date || (typeof initialInvoice.created_at === 'string' ? initialInvoice.created_at.split('T')[0] : '') || toInputDate()));
             setClientName(String(parsedPayload.clientName || initialInvoice.customer_name || ''));
             setSelectedCrmContactId(String(parsedPayload.crmContactId || parsedPayload.crm_contact_id || initialInvoice.crm_contact_id || ''));
             setClientAddress(String(parsedPayload.clientAddress || ''));
@@ -518,16 +521,32 @@ export const CreateInvoice = ({ onBack, onShowHistory, onInvoiceSaved, initialIn
             setClientCountry(String(parsedPayload.clientCountry || 'France'));
             setRecipientEmail(String(parsedPayload.recipientEmail || ''));
             setCoverCount(String(parsedPayload.coverCount || ''));
-            setAmountAlreadyPaid(String(parsedPayload.amountAlreadyPaid ?? initialInvoice.already_paid ?? ''));
+            setAmountAlreadyPaid(String(parsedPayload.amountAlreadyPaid ?? dbPaid ?? ''));
             setAmountMode(parsedPayload.amountMode === 'ht' ? 'ht' : 'ttc');
-            const restoredLines = Array.isArray(parsedPayload.lines) && parsedPayload.lines.length > 0
-                ? parsedPayload.lines.map((line: any) => normalizeLineForRates({
+
+            const payloadLines = Array.isArray(parsedPayload.lines) && parsedPayload.lines.length > 0 ? parsedPayload.lines : [];
+            let restoredLines: InvoiceLine[] = [];
+
+            if (payloadLines.length > 0) {
+                restoredLines = payloadLines.map((line: any) => normalizeLineForRates({
                     id: String(line.id || createLineId()),
                     label: String(line.label || ''),
                     quantity: Math.max(1, Number(line.quantity || 1)),
                     ttcByRate: line.ttcByRate || Object.fromEntries(payloadRates.map((rate: number) => [rate, 0])),
-                }, payloadRates))
-                : [buildEmptyLine(payloadRates, catalog[0]?.label || '')];
+                }, payloadRates));
+            } else if (dbAmount > 0) {
+                // FALLBACK pour les anciennes factures : on crée une ligne virtuelle avec le montant total
+                const primaryRate = payloadRates[0] || 20;
+                restoredLines = [normalizeLineForRates({
+                    id: 'legacy-line',
+                    label: 'Prestation (Historique)',
+                    quantity: 1,
+                    ttcByRate: { [primaryRate]: dbAmount }
+                }, payloadRates)];
+            } else {
+                restoredLines = [buildEmptyLine(payloadRates, catalog[0]?.label || '')];
+            }
+
             setLines(restoredLines);
             setDataLoaded(true);
         } catch (e) {
