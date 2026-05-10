@@ -1,6 +1,14 @@
 // --- API Admin ---
 export const adminApi = {
     getStats: () => apiFetch('/admin/stats'),
+    getSentinelLogs: (category?: string, clientId?: string) => {
+        let url = '/admin/sentinel/logs';
+        const params = new URLSearchParams();
+        if (category) params.append('category', category);
+        if (clientId) params.append('clientId', clientId);
+        const qs = params.toString();
+        return apiFetch(qs ? `${url}?${qs}` : url);
+    },
     getClients: () => apiFetch('/admin/clients'),
     getClient: (clientId: string) => apiFetch(`/admin/clients/${clientId}`),
     uploadLogo: (logoBase64: string, mimeType: string) => apiFetch('/admin/upload-logo', { method: 'POST', body: JSON.stringify({ logoBase64, mimeType }) }),
@@ -40,6 +48,7 @@ export const adminApi = {
     getClientDiagnostics: (clientId: string) => apiFetch(`/admin/clients/${clientId}/diagnostics`),
     sanitizeClientAccount: (clientId: string) => apiFetch(`/admin/clients/${clientId}/sanitize`, { method: 'POST' }),
     clearClientLogo: (clientId: string) => apiFetch(`/admin/clients/${clientId}/clear-logo`, { method: 'POST' }),
+    logAction: (payload: { action: string; category?: string; severity?: string; message: string }) => apiFetch('/admin/sentinel/log-action', { method: 'POST', body: JSON.stringify(payload) }),
 };
 const API_URL = '/api';
 

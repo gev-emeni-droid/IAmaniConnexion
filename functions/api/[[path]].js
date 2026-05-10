@@ -7,8 +7,20 @@ import { compareSync, hashSync } from 'bcryptjs';
 export const app = new Hono().basePath('/api');
 app.use('*', cors());
 
-app.onError((err, c) => {
+app.onError(async (err, c) => {
     console.error('GLOBAL ERROR:', err);
+    
+    // Log System Error to Sentinel
+    try {
+        await ensureAuditLogsSchema(c);
+        await insertAuditLog(c, {
+            action: 'SYSTEM_ERROR',
+            category: LOG_CATEGORIES.SYSTEM,
+            severity: LOG_SEVERITIES.ALERT,
+            newValue: `Erreur système 500 sur la route ${c.req.path}. Message: ${err.message}`
+        });
+    } catch (logErr) {}
+
     return c.json({
         error: `Erreur Globale: ${err?.message || 'Erreur inconnue'}`,
         path: c.req.path,
@@ -16,7 +28,35 @@ app.onError((err, c) => {
     }, 500);
 });
 
+app.notFound(async (c) => {
+    // Log 404 to Sentinel
+    try {
+        await ensureAuditLogsSchema(c);
+        await insertAuditLog(c, {
+            action: 'NOT_FOUND',
+            category: LOG_CATEGORIES.SYSTEM,
+            severity: LOG_SEVERITIES.WARNING,
+            newValue: `Page non trouvée (404) : ${c.req.path}`
+        });
+    } catch (e) {}
+    return c.json({ error: 'Route non trouvée' }, 404);
+});
+
 // --- CONSTANTS ---
+const LOG_CATEGORIES = {
+    GLOBAL: 'GLOBAL',
+    SECURITY: 'SECURITE',
+    BUSINESS: 'METIER',
+    SYSTEM: 'SYSTEME'
+};
+
+const LOG_SEVERITIES = {
+    SUCCESS: 'success',
+    INFO: 'info',
+    WARNING: 'warning',
+    ALERT: 'alert'
+};
+
 const superAdminPayload = {
     id: 'superadmin',
     name: 'Super Admin',
@@ -197,6 +237,165 @@ const safeFirst = async (c, query, params = []) => {
     }
 };
 
+const safeRun = async (c, query, params = []) => {
+    try {
+        const db = c.env?.DB;
+        if (!db) return null;
+        return await db.prepare(query).bind(...params).run();
+    } catch (e) {
+        console.error('D1 Run Error:', e.message);
+        return null;
+    }
+};
+
+const insertAuditLog = async (c, params) => {
+    try {
+        const user = await getUserFromReq(c);
+        const userId = user?.id || 'système';
+        const ip = c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || 'Non renseignée';
+        const ua = c.req.header('user-agent') || 'Non renseigné';
+        
+        await c.env.DB.prepare(`
+            INSERT INTO audit_logs (id, user_id, target_user_id, client_id, action, category, severity, old_value, new_value, ip_address, user_agent, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        `).bind(
+            generateId().substring(0, 12),
+            userId,
+            params.targetUserId || '',
+            params.clientId || params.targetClientId || '',
+            params.action,
+            params.category || LOG_CATEGORIES.GLOBAL,
+            params.severity || 'info',
+            params.oldValue || '',
+            params.newValue || 'Aucun détail disponible',
+            ip,
+            ua
+        ).run();
+    } catch (e) {
+        console.error('Erreur lors de la journalisation:', e.message);
+    }
+};
+
+const propagatePlanningChanges = async (c, ownerId, changedEmployeeIds) => {
+    try {
+        const now = new Date();
+        const monday = new Date(now);
+        const day = now.getDay();
+        const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+        monday.setDate(diff);
+        monday.setHours(0, 0, 0, 0);
+        const mondayStr = monday.toISOString().split('T')[0];
+
+        // 1. Settings & Templates
+        const settingsRow = await safeFirst(c, 'SELECT payload_json FROM planning_settings WHERE client_id = ?', [ownerId]);
+        const settings = settingsRow ? JSON.parse(settingsRow.payload_json) : {};
+        const weeklyDefaults = settings.weeklyDefaults || {};
+        
+        const tplRow = await safeFirst(c, 'SELECT payload_json FROM planning_templates WHERE client_id = ?', [ownerId]);
+        const templates = tplRow ? JSON.parse(tplRow.payload_json) : [];
+        const templateMap = {};
+        templates.forEach(t => { templateMap[t.id] = t; });
+
+        // 2. Absences
+        const absRes = await c.env.DB.prepare('SELECT * FROM planning_absences WHERE client_id = ?').bind(ownerId).all();
+        const absences = absRes.results || [];
+
+        // 3. Future Weeks
+        const weekRes = await c.env.DB.prepare('SELECT * FROM planning_weeks WHERE client_id = ? AND week_start >= ?').bind(ownerId, mondayStr).all();
+        const weeks = weekRes.results || [];
+
+        for (const week of weeks) {
+            let payload = JSON.parse(week.payload_json);
+            let hasChanges = false;
+            if (!payload.rows) continue;
+
+            const weekStart = new Date(week.week_start);
+
+            payload.rows = payload.rows.map(row => {
+                if (changedEmployeeIds.includes(String(row.employeeId))) {
+                    const empDefaults = weeklyDefaults[String(row.employeeId)] || {};
+                    const newShifts = { ...row.shifts };
+
+                    for (let i = 0; i < 7; i++) {
+                        const d = new Date(weekStart);
+                        d.setDate(d.getDate() + i);
+                        const dayDate = d.toISOString().split('T')[0];
+                        
+                        // PROTECTION : Ne pas écraser si saisi manuellement ou si c'est déjà une absence
+                        const currentShift = newShifts[dayDate];
+                        if (currentShift && (currentShift.isManual || currentShift.type === 'absence')) {
+                            continue;
+                        }
+
+                        const dayNames = ['lundi','mardi','mercredi','jeudi','vendredi','samedi','dimanche'];
+                        const defaultKey = empDefaults[String(i)] || empDefaults[dayNames[i]] || 'REPOS';
+                        
+                        let targetShift;
+                        if (defaultKey === 'REPOS') {
+                            targetShift = { date: dayDate, type: 'repos', serviceType: 'none', segments: [{ type: 'code', label: 'REPOS' }] };
+                        } else {
+                            const tpl = templateMap[defaultKey];
+                            if (tpl) {
+                                targetShift = {
+                                    date: dayDate,
+                                    type: 'travail',
+                                    serviceType: tpl.serviceType || 'midi+soir',
+                                    segments: (tpl.slots || []).map(s => ({ type: 'horaire', start: s.start, end: s.end, templateId: tpl.id, color: tpl.color }))
+                                };
+                            } else {
+                                targetShift = { date: dayDate, type: 'repos', serviceType: 'none', segments: [{ type: 'code', label: 'REPOS' }] };
+                            }
+                        }
+
+                        // Absence override (Priority)
+                        const activeAbs = absences.find(a => String(a.employee_id) === String(row.employeeId) && dayDate >= a.start_date && dayDate <= a.end_date);
+                        if (activeAbs) {
+                            targetShift = {
+                                date: dayDate,
+                                type: 'absence',
+                                serviceType: 'none',
+                                segments: [{ type: 'code', label: activeAbs.absence_type || 'ABS' }]
+                            };
+                        }
+                        
+                        newShifts[dayDate] = targetShift;
+                    }
+                    hasChanges = true;
+                    return { ...row, shifts: newShifts };
+                }
+                return row;
+            });
+
+            if (hasChanges) {
+                await c.env.DB.prepare('UPDATE planning_weeks SET payload_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(JSON.stringify(payload), week.id).run();
+            }
+        }
+    } catch (e) { console.error('Propagation Error:', e); }
+};
+
+const ensureAuditLogsSchema = async (c) => {
+    try {
+        const db = c.env.DB;
+        const info = await db.prepare('PRAGMA table_info(audit_logs)').all();
+        const cols = (info.results || []).map(r => r.name);
+        
+        if (!cols.includes('category')) {
+            await db.prepare("ALTER TABLE audit_logs ADD COLUMN category TEXT DEFAULT 'global'").run();
+        }
+        if (!cols.includes('severity')) {
+            await db.prepare("ALTER TABLE audit_logs ADD COLUMN severity TEXT DEFAULT 'info'").run();
+        }
+        if (!cols.includes('client_id')) {
+            await db.prepare("ALTER TABLE audit_logs ADD COLUMN client_id TEXT").run();
+        }
+        if (!cols.includes('user_agent')) {
+            await db.prepare("ALTER TABLE audit_logs ADD COLUMN user_agent TEXT").run();
+        }
+    } catch (e) {
+        console.error('Schema migration error (audit_logs):', e);
+    }
+};
+
 const renderEmail = (content, title = 'IAmani', brandName = 'IAmani') => {
     return `
 <!DOCTYPE html>
@@ -288,7 +487,20 @@ app.post('/auth/login', async (c) => {
 
             if (isValid) {
                 const adminUser = { id: String(admin.id), name: String(admin.name || 'Super Admin'), email: String(admin.email), type: 'admin', role: 'superadmin', permissions: ['all'] };
+                await insertAuditLog(c, {
+                    action: 'LOGIN_SUCCESS',
+                    category: LOG_CATEGORIES.SECURITY,
+                    severity: LOG_SEVERITIES.SUCCESS,
+                    newValue: `Connexion Administrateur réussie pour : ${identifier}`
+                });
                 return c.json({ token: await sign(adminUser, getSecret(c)), user: adminUser });
+            } else {
+                await insertAuditLog(c, {
+                    action: 'LOGIN_FAILED',
+                    category: LOG_CATEGORIES.SECURITY,
+                    severity: LOG_SEVERITIES.WARNING,
+                    newValue: `Échec de connexion Admin (MDP incorrect) : ${identifier}`
+                });
             }
         }
 
@@ -312,7 +524,22 @@ app.post('/auth/login', async (c) => {
                     type: 'client',
                     role: 'client'
                 };
+                await insertAuditLog(c, {
+                    action: 'LOGIN_SUCCESS',
+                    category: LOG_CATEGORIES.SECURITY,
+                    severity: LOG_SEVERITIES.SUCCESS,
+                    clientId: client.id,
+                    newValue: `Connexion réussie pour l'établissement : ${client.company_name || identifier}`
+                });
                 return c.json({ token: await sign(user, getSecret(c)), user });
+            } else {
+                await insertAuditLog(c, {
+                    action: 'LOGIN_FAILED',
+                    category: LOG_CATEGORIES.SECURITY,
+                    severity: LOG_SEVERITIES.WARNING,
+                    clientId: client.id,
+                    newValue: `Échec de connexion (Mot de passe incorrect) pour : ${identifier}`
+                });
             }
         }
 
@@ -341,11 +568,50 @@ app.post('/auth/login', async (c) => {
                     role: String(collab.role || 'staff'),
                     modules: typeof collab.modules_access === 'string' ? JSON.parse(collab.modules_access || '[]') : (collab.modules_access || [])
                 };
+                await insertAuditLog(c, {
+                    action: 'LOGIN_SUCCESS',
+                    category: LOG_CATEGORIES.SECURITY,
+                    severity: LOG_SEVERITIES.SUCCESS,
+                    clientId: collab.client_id,
+                    newValue: `Connexion du collaborateur réussie : ${collab.name} (${identifier})`
+                });
                 return c.json({ token: await sign(user, getSecret(c)), user });
+            } else {
+                await insertAuditLog(c, {
+                    action: 'LOGIN_FAILED',
+                    category: LOG_CATEGORIES.SECURITY,
+                    severity: LOG_SEVERITIES.WARNING,
+                    clientId: collab.client_id,
+                    newValue: `Échec de connexion Collaborateur (MDP incorrect) : ${identifier}`
+                });
             }
         }
+
+        await insertAuditLog(c, {
+            action: 'LOGIN_NOT_FOUND',
+            category: LOG_CATEGORIES.SECURITY,
+            severity: LOG_SEVERITIES.ALERT,
+            newValue: `Identifiant inconnu : ${identifier}`
+        });
         return c.json({ error: 'Identifiants incorrects' }, 401);
     } catch (e) { return c.json({ error: 'Erreur Serveur' }, 500); }
+});
+
+app.post('/auth/logout', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (user) {
+            const ownerId = (user.type === 'collaborator' || user.type === 'staff') ? (user.client_id || user.clientId) : (user.clientId || user.id);
+            await insertAuditLog(c, {
+                action: 'LOGOUT',
+                category: LOG_CATEGORIES.SECURITY,
+                severity: LOG_SEVERITIES.INFO,
+                clientId: ownerId,
+                newValue: `Déconnexion de l'utilisateur : ${user.name || user.email}`
+            });
+        }
+        return c.json({ success: true });
+    } catch (e) { return c.json({ success: true }); }
 });
 
 app.get('/auth/me', async (c) => {
@@ -443,6 +709,13 @@ app.put('/user/profile', async (c) => {
             if (user.type === 'client') {
                 sets.push('is_temporary_password = 0');
             }
+
+            await insertAuditLog(c, {
+                action: 'UPDATE_PASSWORD',
+                category: LOG_CATEGORIES.SECURITY,
+                severity: LOG_SEVERITIES.WARNING,
+                newValue: `Le mot de passe a été modifié avec succès par l'utilisateur.`
+            });
         }
 
         if (sets.length === 0) return c.json({ success: true, message: 'Aucun changement' });
@@ -550,6 +823,13 @@ app.post('/admin/clients', async (c) => {
         for (const m of modules) await c.env.DB.prepare('INSERT INTO client_modules (client_id, module_name, is_active) VALUES (?, ?, 1)').bind(id, m).run();
         await c.env.DB.prepare('INSERT INTO billing_settings (client_id, company_name, logo_url) VALUES (?, ?, ?)').bind(id, body.company_name||'', body.logo_url||null).run();
         await sendEmail(c, { to: body.email, subject: 'Bienvenue sur IAmani', html: renderEmail(`<p>Identifiant: ${body.username}<br>Mot de passe: ${pwd}</p>`, 'Bienvenue') });
+        await insertAuditLog(c, {
+            action: 'CREATE_CLIENT',
+            category: LOG_CATEGORIES.GLOBAL,
+            severity: LOG_SEVERITIES.SUCCESS,
+            newValue: `Nouveau client créé : ${body.company_name || body.name}`
+        });
+
         return c.json({ success: true, id, tempPassword: pwd });
     } catch (e) { return c.json({ error: e.message }, 500); }
 });
@@ -570,6 +850,14 @@ app.patch('/admin/clients/:id', async (c) => {
         const b = await c.req.json();
         await c.env.DB.prepare(`UPDATE clients SET name=?, email=?, username=?, company_name=?, logo_url=?, tva_rates=?, enable_cover_count=?, status=?, account_manager_first_name=?, account_manager_last_name=?, account_manager_phone=?, account_manager_email=?, legal_form=?, siret=?, vat_number=?, company_address=?, company_postal_code=?, company_city=?, company_country=?, company_employee_count=? WHERE id=?`)
             .bind(b.name||'', b.email||'', b.username||'', b.company_name||'', b.logo_url||null, JSON.stringify(b.tva_rates||[20]), b.enable_cover_count?1:0, b.status||'active', b.account_manager_first_name||'', b.account_manager_last_name||'', b.account_manager_phone||'', b.account_manager_email||'', b.legal_form||'', b.siret||'', b.vat_number||'', b.company_address||'', b.company_postal_code||'', b.company_city||'', b.company_country||'France', Number(b.company_employee_count||0), c.req.param('id')).run();
+        
+        await insertAuditLog(c, {
+            action: 'UPDATE_CLIENT',
+            category: LOG_CATEGORIES.GLOBAL,
+            severity: LOG_SEVERITIES.INFO,
+            newValue: `Fiche client modifiée : ${b.company_name || b.name}`
+        });
+
         return c.json({ success: true });
     } catch (e) { return c.json({ error: e.message }, 500); }
 });
@@ -582,6 +870,14 @@ app.delete('/admin/clients/:id', async (c) => {
         const tables = ['client_documents', 'collaborators', 'client_modules', 'support_tickets', 'planning', 'evenementiel_calendars', 'evenementiel_spaces', 'evenementiel_staff_types', 'evenementiel', 'evenementiel_config', 'facture', 'employes', 'crm_contacts', 'billing_settings', 'planning_weeks', 'planning_templates', 'planning_settings', 'planning_archives', 'client_settings'];
         for (const t of tables) try { await c.env.DB.prepare(`DELETE FROM ${t} WHERE client_id = ?`).bind(id).run(); } catch (err) {}
         await c.env.DB.prepare('DELETE FROM clients WHERE id = ?').bind(id).run();
+
+        await insertAuditLog(c, {
+            action: 'DELETE_CLIENT',
+            category: LOG_CATEGORIES.GLOBAL,
+            severity: LOG_SEVERITIES.WARNING,
+            newValue: `Client supprimé (ID : ${id})`
+        });
+
         return c.json({ success: true });
     } catch (e) { return c.json({ error: e.message }, 500); }
 });
@@ -796,11 +1092,102 @@ app.get('/admin/clients/:id/diagnostics', async (c) => {
     } catch (e) { return c.json({ error: 'Erreur' }, 500); }
 });
 
+app.post('/admin/upload-logo', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user || user.type !== 'admin') return c.json({ error: 'Accès refusé' }, 401);
+        const { logoBase64, mimeType } = await c.req.json();
+        if (!logoBase64) return c.json({ error: 'Données manquantes' }, 400);
+        const dataUrl = `data:${mimeType || 'image/png'};base64,${logoBase64}`;
+        if (dataUrl.length > 1000000) return c.json({ error: 'Logo trop volumineux (max 1Mo)' }, 400);
+        return c.json({ logo_url: dataUrl });
+    } catch (e) { return c.json({ error: 'Erreur' }, 500); }
+});
+
+app.post('/admin/clients/:id/clear-logo', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user || user.type !== 'admin') return c.json({ error: 'Accès refusé' }, 401);
+        await c.env.DB.prepare('UPDATE clients SET logo_url = NULL WHERE id = ?').bind(c.req.param('id')).run();
+        return c.json({ success: true });
+    } catch (e) { return c.json({ error: 'Erreur' }, 500); }
+});
+
+app.get('/admin/sentinel/logs', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user || user.type !== 'admin') return c.json({ error: 'Accès refusé' }, 401);
+        
+        await ensureAuditLogsSchema(c);
+        
+        const category = c.req.query('category');
+        const clientId = c.req.query('clientId');
+        const limit = parseInt(c.req.query('limit') || '100');
+        
+        let query = `
+            SELECT 
+                al.*,
+                COALESCE(adm.name, cl.name, col.name, 'Système') as actor_name,
+                COALESCE(adm.email, cl.email, col.email, 'system@iamani.com') as actor_email,
+                target_cl.company_name as client_name
+            FROM audit_logs al
+            LEFT JOIN admins adm ON al.user_id = adm.id
+            LEFT JOIN clients cl ON al.user_id = cl.id
+            LEFT JOIN collaborators col ON al.user_id = col.id
+            LEFT JOIN clients target_cl ON al.client_id = target_cl.id
+            WHERE 1=1
+        `;
+        const params = [];
+        
+        if (category && category !== 'global') {
+            query += ` AND al.category = ?`;
+            params.push(category);
+        }
+        
+        if (clientId) {
+            query += ` AND al.client_id = ?`;
+            params.push(clientId);
+        }
+        
+        query += ` ORDER BY al.created_at DESC LIMIT ?`;
+        params.push(limit);
+        
+        const rows = await safeQuery(c, query, params);
+        return c.json(rows.map(r => ({ ...r, created_at: toISO(r.created_at) })));
+    } catch (e) { 
+        console.error('Sentinel Error:', e);
+        return c.json([]); 
+    }
+});
+
+app.post('/admin/sentinel/log-action', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user) return c.json({ error: 'Accès refusé' }, 401);
+        
+        const { action, category, message, details } = await c.req.json();
+        
+        await insertAuditLog(c, {
+            userId: user.id,
+            clientId: user.clientId || user.id,
+            action: action || 'CUSTOM_ACTION',
+            category: category || 'METIER',
+            message: message || 'Action utilisateur personnalisée',
+            details: details || {}
+        });
+        
+        return c.json({ success: true });
+    } catch (e) {
+        console.error('Log-action error:', e);
+        return c.json({ error: 'Erreur lors de l\'enregistrement du log' }, 500);
+    }
+});
+
 app.get('/admin/clients/:id/audit-logs', async (c) => {
     try {
         const user = await getUserFromReq(c);
         if (!user || user.type !== 'admin') return c.json({ error: 'Accès refusé' }, 401);
-        const rows = await safeQuery(c, 'SELECT * FROM audit_logs WHERE target_user_id = ? ORDER BY created_at DESC', [c.req.param('id')]);
+        const rows = await safeQuery(c, 'SELECT * FROM audit_logs WHERE client_id = ? OR target_user_id = ? ORDER BY created_at DESC', [c.req.param('id'), c.req.param('id')]);
         return c.json(rows.map(r => ({ ...r, created_at: toISO(r.created_at) })));
     } catch (e) { return c.json([]); }
 });
@@ -864,8 +1251,25 @@ app.post('/admin/clients/:id/impersonate', async (c) => {
         if (!user || user.type !== 'admin') return c.json({ error: 'Accès refusé' }, 401);
         const cl = await safeFirst(c, `SELECT ${clientCols} FROM clients WHERE id = ?`, [c.req.param('id')]);
         if (!cl) return c.json({ error: '404' }, 404);
+        
+        await insertAuditLog(c, {
+            action: 'IMPERSONATE',
+            category: LOG_CATEGORIES.SECURITY,
+            severity: LOG_SEVERITIES.WARNING,
+            clientId: cl.id,
+            newValue: `Super Admin a pris le contrôle de la session pour l'établissement : ${cl.company_name || cl.name}`
+        });
+
         const p = { id: cl.id, clientId: cl.id, name: cl.name, type: 'client', role: 'client', impersonatedBySuperAdmin: true };
         return c.json({ token: await sign(p, getSecret(c)), user: p });
+    } catch (e) { return c.json({ error: 'Erreur' }, 500); }
+});
+
+app.post('/admin/clients/:id/sanitize', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user || user.type !== 'admin') return c.json({ error: 'Accès refusé' }, 401);
+        return c.json({ success: true });
     } catch (e) { return c.json({ error: 'Erreur' }, 500); }
 });
 
@@ -928,7 +1332,16 @@ app.get('/planning/week/:date', async (c) => {
 
         const row = await safeFirst(c, 'SELECT payload_json FROM planning_weeks WHERE client_id = ? AND week_start = ?', [ownerId, date]);
         let data = row && row.payload_json ? JSON.parse(row.payload_json) : null;
-        if (data) data.week_start = date;
+        if (data) {
+            data.week_start = date;
+            await insertAuditLog(c, {
+                action: 'VIEW_PLANNING',
+                category: LOG_CATEGORIES.BUSINESS,
+                severity: LOG_SEVERITIES.INFO,
+                clientId: ownerId,
+                newValue: `Consultation du planning pour la semaine du ${date}`
+            });
+        }
         return c.json(data);
     } catch (e) {
         console.error('[GET /planning/week/:date] Error:', e);
@@ -953,6 +1366,14 @@ app.post('/planning/week', async (c) => {
             ON CONFLICT(client_id, week_start)
             DO UPDATE SET payload_json = EXCLUDED.payload_json, updated_at = CURRENT_TIMESTAMP
         `).bind(body.id || generateId(), ownerId, date, JSON.stringify(body)).run();
+
+        await insertAuditLog(c, {
+            action: 'UPDATE_PLANNING',
+            category: LOG_CATEGORIES.BUSINESS,
+            severity: LOG_SEVERITIES.INFO,
+            clientId: ownerId,
+            newValue: `Modification du planning pour la semaine du ${date}`
+        });
 
         return c.json({ success: true });
     } catch (e) {
@@ -1022,6 +1443,15 @@ app.post('/planning/archive', async (c) => {
                 filename = excluded.filename,
                 created_at = CURRENT_TIMESTAMP
         `).bind(id, ownerId, week_start, year, week_number, pdf_base64, filename).run();
+
+        await insertAuditLog(c, {
+            action: 'PRINT_PLANNING',
+            category: LOG_CATEGORIES.BUSINESS,
+            severity: LOG_SEVERITIES.SUCCESS,
+            clientId: ownerId,
+            newValue: `Impression et archive du planning : ${filename}`
+        });
+
         return c.json({ success: true, id });
     } catch (e) {
         return c.json({ error: e.message }, 500);
@@ -1225,6 +1655,11 @@ app.post('/planning/settings', async (c) => {
             DO UPDATE SET payload_json = EXCLUDED.payload_json, updated_at = CURRENT_TIMESTAMP
         `).bind(ownerId, JSON.stringify(merged)).run();
 
+        // Propagation immédiate des changements d'horaires par défaut
+        if (merged.weeklyDefaults) {
+            await propagatePlanningChanges(c, ownerId, Object.keys(merged.weeklyDefaults));
+        }
+
         return c.json({ success: true });
     } catch (e) {
         console.error('[POST /planning/settings] Error:', e);
@@ -1259,17 +1694,19 @@ app.post('/planning/absences', async (c) => {
             return c.json({ error: 'Missing fields' }, 400);
         }
 
-        const id = body.id || generateId();
         await c.env.DB.prepare(`
             INSERT INTO planning_absences (id, client_id, employee_id, start_date, end_date, absence_type)
             VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
-                start_date = excluded.start_date,
-                end_date = excluded.end_date,
-                absence_type = excluded.absence_type
-        `).bind(id, ownerId, body.employee_id, body.start_date, body.end_date, body.absence_type || 'CP').run();
+                start_date = EXCLUDED.start_date,
+                end_date = EXCLUDED.end_date,
+                absence_type = EXCLUDED.absence_type
+        `).bind(body.id || generateId(), ownerId, body.employee_id, body.start_date, body.end_date, body.absence_type).run();
+        
+        // Propagation immédiate de l'absence sur les plannings existants
+        await propagatePlanningChanges(c, ownerId, [String(body.employee_id)]);
 
-        return c.json({ success: true, id });
+        return c.json({ success: true });
     } catch (e) {
         return c.json({ error: e.message }, 500);
     }
@@ -1282,7 +1719,14 @@ app.delete('/planning/absences/:id', async (c) => {
         const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
         const id = c.req.param('id');
 
+        const abs = await safeFirst(c, 'SELECT employee_id FROM planning_absences WHERE id = ?', [id]);
         await c.env.DB.prepare('DELETE FROM planning_absences WHERE id = ? AND client_id = ?').bind(id, ownerId).run();
+        
+        // Si on supprime une absence, on doit aussi propager pour restaurer les horaires par défaut
+        if (abs) {
+            await propagatePlanningChanges(c, ownerId, [String(abs.employee_id)]);
+        }
+
         return c.json({ success: true });
     } catch (e) {
         return c.json({ error: e.message }, 500);
@@ -1577,6 +2021,15 @@ app.post('/evenementiel', async (c) => {
             await c.env.DB.prepare('INSERT INTO event_notes (id, event_id, client_id, note_text) VALUES (?, ?, ?, ?)').bind(generateId(), id, ownerId, body.note_text).run();
         }
 
+        const eventName = body.organizer_name || body.company_name || `${body.first_name} ${body.last_name}`.trim() || 'Événement sans nom';
+        await insertAuditLog(c, {
+            action: 'CREATE_EVENT',
+            category: LOG_CATEGORIES.BUSINESS,
+            severity: LOG_SEVERITIES.SUCCESS,
+            clientId: ownerId,
+            newValue: `Nouvelle privatisation créée : "${eventName}" le ${new Date(startTime).toLocaleDateString('fr-FR')}`
+        });
+
         return c.json({ success: true, id });
     } catch (e) {
         console.error('POST Event Error:', e);
@@ -1691,7 +2144,6 @@ app.put('/evenementiel/:id', async (c) => {
             }
         }
 
-        // 4. Notes
         if (body.note_text !== undefined) {
             await c.env.DB.prepare('DELETE FROM event_notes WHERE event_id = ?').bind(id).run();
             if (body.note_text && body.note_text.trim() !== '') {
@@ -1699,6 +2151,15 @@ app.put('/evenementiel/:id', async (c) => {
                     .bind(generateId(), id, ownerId, body.note_text).run();
             }
         }
+
+        const eventName = body.organizer_name || body.company_name || `${body.first_name} ${body.last_name}`.trim() || 'Événement sans nom';
+        await insertAuditLog(c, {
+            action: 'UPDATE_EVENT',
+            category: LOG_CATEGORIES.BUSINESS,
+            severity: LOG_SEVERITIES.INFO,
+            clientId: ownerId,
+            newValue: `Modification de la privatisation : "${eventName}"`
+        });
 
         return c.json({ success: true });
     } catch (e) {
@@ -1712,7 +2173,20 @@ app.delete('/evenementiel/:id', async (c) => {
         const user = await getUserFromReq(c);
         if (!user) return c.json({ error: 'Auth' }, 401);
         const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
-        await c.env.DB.prepare('DELETE FROM evenementiel WHERE id = ? AND client_id = ?').bind(c.req.param('id'), ownerId).run();
+        const eventId = c.req.param('id');
+        const existing = await safeFirst(c, 'SELECT first_name, last_name, company_name, organizer_name FROM evenementiel WHERE id = ? AND client_id = ?', [eventId, ownerId]);
+        const eventName = existing ? (existing.organizer_name || existing.company_name || `${existing.first_name} ${existing.last_name}`.trim()) : eventId;
+
+        await c.env.DB.prepare('DELETE FROM evenementiel WHERE id = ? AND client_id = ?').bind(eventId, ownerId).run();
+
+        await insertAuditLog(c, {
+            action: 'DELETE_EVENT',
+            category: LOG_CATEGORIES.BUSINESS,
+            severity: LOG_SEVERITIES.WARNING,
+            clientId: ownerId,
+            newValue: `A supprimé la privatisation : "${eventName || 'inconnue'}"`
+        });
+
         return c.json({ success: true });
     } catch (e) { return c.json({ error: 'Suppression échouée' }, 500); }
 });
@@ -2151,6 +2625,15 @@ app.post('/facture', async (c) => {
             body.crm_contact_id || null,
             JSON.stringify(body)
         ).run();
+
+        await insertAuditLog(c, {
+            action: 'CREATE_INVOICE',
+            category: LOG_CATEGORIES.BUSINESS,
+            severity: LOG_SEVERITIES.SUCCESS,
+            clientId: ownerId,
+            newValue: `Facture n°${invoiceNumber} générée (Montant : ${new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(amount)})`
+        });
+
         return c.json({ success: true, id });
     } catch (e) {
         console.error('POST Facture Error:', e);
@@ -2231,6 +2714,15 @@ app.post('/facture/:id/send-email', async (c) => {
 
         if (emailRes.success) {
             await c.env.DB.prepare('UPDATE facture SET last_sent_at = CURRENT_TIMESTAMP, last_sent_email = ? WHERE id = ?').bind(body.to, id).run();
+            
+            await insertAuditLog(c, {
+                action: 'SEND_INVOICE_EMAIL',
+                category: LOG_CATEGORIES.BUSINESS,
+                severity: LOG_SEVERITIES.SUCCESS,
+                clientId: ownerId,
+                newValue: `Facture #${body.invoicePayload?.invoice_number || id} envoyée par email à ${body.to}`
+            });
+
             return c.json({ success: true });
         } else {
             return c.json({ error: emailRes.error }, 500);
@@ -2346,6 +2838,14 @@ app.put('/employes/:id', async (c) => {
             body.phone || null, body.address || null, id, ownerId
         ).run();
 
+        await insertAuditLog(c, {
+            action: 'UPDATE_EMPLOYEE',
+            category: LOG_CATEGORIES.BUSINESS,
+            severity: LOG_SEVERITIES.INFO,
+            clientId: ownerId,
+            newValue: `Fiche employé modifiée : ${body.first_name} ${body.last_name}`
+        });
+
         // Mise à jour des documents si présents
         if (Array.isArray(body.documents)) {
             await c.env.DB.prepare('DELETE FROM employee_documents WHERE employee_id = ? AND client_id = ?').bind(id, ownerId).run();
@@ -2376,6 +2876,14 @@ app.post('/employes', async (c) => {
         await c.env.DB.prepare('INSERT INTO employes (id, client_id, first_name, last_name, email, position, salary, hire_date, tags, phone, address) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
             .bind(id, ownerId, body.first_name, body.last_name, body.email, body.position, body.salary || null, body.hire_date || null, JSON.stringify(body.tags || []), body.phone || null, body.address || null).run();
             
+        await insertAuditLog(c, {
+            action: 'CREATE_EMPLOYEE',
+            category: LOG_CATEGORIES.BUSINESS,
+            severity: LOG_SEVERITIES.SUCCESS,
+            clientId: ownerId,
+            newValue: `Nouvel employé ajouté : ${body.first_name} ${body.last_name}`
+        });
+            
         if (Array.isArray(body.documents) && body.documents.length > 0) {
             const batch = body.documents.map(doc => 
                 c.env.DB.prepare('INSERT INTO employee_documents (id, employee_id, client_id, display_name, file_name, mime_type, file_size, storage_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
@@ -2402,6 +2910,14 @@ app.delete('/employes/:id', async (c) => {
             c.env.DB.prepare('DELETE FROM employee_documents WHERE employee_id = ? AND client_id = ?').bind(id, ownerId),
             c.env.DB.prepare('DELETE FROM employes WHERE id = ? AND client_id = ?').bind(id, ownerId)
         ]);
+
+        await insertAuditLog(c, {
+            action: 'DELETE_EMPLOYEE',
+            category: LOG_CATEGORIES.BUSINESS,
+            severity: LOG_SEVERITIES.WARNING,
+            clientId: ownerId,
+            newValue: `Employé supprimé (ID : ${id})`
+        });
 
         return c.json({ success: true });
     } catch (e) { return c.json({ error: 'Erreur Suppression Employé' }, 500); }
@@ -2690,6 +3206,15 @@ app.get('/dashboard/stats', async (c) => {
         const pendingRes = await safeFirst(c, 'SELECT COUNT(*) as total FROM facture WHERE client_id = ? AND status != ?', [ownerId, 'PAID']);
         const employesRes = await safeFirst(c, 'SELECT COUNT(*) as total FROM employes WHERE client_id = ?', [ownerId]);
         const planningRes = await safeFirst(c, 'SELECT COUNT(*) as total FROM planning_weeks WHERE client_id = ?', [ownerId]);
+
+        // TEST FORCÉ SENTINEL
+        await insertAuditLog(c, {
+            action: 'DASHBOARD_ACCESS',
+            category: LOG_CATEGORIES.BUSINESS,
+            severity: LOG_SEVERITIES.INFO,
+            clientId: ownerId,
+            newValue: `Le tableau de bord a été consulté par ${user.name || 'un utilisateur'}.`
+        });
 
         return c.json({
             revenue: revenueRes?.total || 0,

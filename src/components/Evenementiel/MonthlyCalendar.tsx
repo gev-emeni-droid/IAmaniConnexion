@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { adminApi } from '../../lib/api';
 import {
     format,
     startOfMonth,
@@ -122,7 +123,18 @@ export const MonthlyCalendar = ({ month, year, events, configSpaces = [], onMont
         setWeekAnchor(w => addWeeks(w, 1));
     };
 
-    const exportPrint = () => window.print();
+    const exportPrint = () => {
+        const label = viewMode === 'month' 
+            ? format(currentMonth, 'MMMM yyyy', { locale: fr })
+            : `Semaine du ${format(days[0], 'd MMMM yyyy', { locale: fr })}`;
+
+        adminApi.logAction({
+            action: 'PRINT_DOCUMENT',
+            category: 'METIER',
+            message: `A imprimé le calendrier des privatisations : ${label}`
+        }).catch(() => {});
+        window.print();
+    };
 
     return (
         <>

@@ -37,6 +37,7 @@ export interface Shift {
   type: ShiftType;
   serviceType: ShiftServiceType;
   segments: ShiftSegment[];
+  isManual?: boolean;
 }
 
 export interface PlanningRow {

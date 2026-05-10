@@ -356,11 +356,15 @@ CREATE TABLE IF NOT EXISTS billing_settings (
 CREATE TABLE IF NOT EXISTS audit_logs (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
-    target_user_id TEXT NOT NULL,
+    target_user_id TEXT,
+    client_id TEXT, -- The establishment concerned
     action TEXT NOT NULL,
+    category TEXT DEFAULT 'global', -- global, security, business, system
+    severity TEXT DEFAULT 'info', -- success, info, warning, alert
     old_value TEXT,
     new_value TEXT,
     ip_address TEXT,
+    user_agent TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 

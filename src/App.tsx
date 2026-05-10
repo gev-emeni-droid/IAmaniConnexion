@@ -9,8 +9,16 @@ const ALL_MODULES = [
     { name: 'support', label: 'Support' },
     { name: 'rh', label: 'RH' }
 ];
+
+const ACTIONS_TRANSLATION = {
+    'PRINT_INVOICE': 'Impression Facture',
+    'MODULE_VISIT': 'Navigation Module',
+    'PRINT_DOCUMENT': 'Impression Document',
+    'DOWNLOAD_DOCUMENT': 'Téléchargement Document'
+};
+
 import React, { useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, Link, useNavigate, useParams } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, Link, useNavigate, useParams, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { 
     LayoutDashboard, 
@@ -25,6 +33,7 @@ import {
     XCircle,
     ChevronRight,
     ShieldCheck,
+    ShieldAlert,
     Lock,
     Mail,
     Trash2,
@@ -66,12 +75,7 @@ import { PlanningTableView } from './components/Planning/PlanningTableView';
 import { SupportModal } from './components/Support/SupportModal';
 import { InfoModal } from './components/InfoModal';
 import { useTheme } from './hooks/useTheme';
-
-
-// --- Vue Événementiel (doit être à la racine, avant tout JSX) ---
-
-
-// --- Components ---
+import { SentinelJournal } from './components/Admin/SentinelJournal';
 
 const SidebarItem = ({ icon: Icon, label, to, active, collapsed = false }: any) => (
     <Link 
@@ -104,6 +108,41 @@ const ExternalSidebarItem = ({ icon: Icon, label, href, collapsed = false }: any
         {!collapsed && <span className="font-medium text-[15px] min-w-0 truncate">{label}</span>}
     </a>
 );
+
+const ModuleTracker = () => {
+    const location = useLocation();
+    const { user } = useAuth();
+    const lastPathRef = React.useRef(location.pathname);
+
+    React.useEffect(() => {
+        if (!user || user.type === 'admin') return;
+        
+        const path = location.pathname;
+        if (path === lastPathRef.current) return;
+        
+        const modules: Record<string, string> = {
+            '/planning': 'Planning',
+            '/evenementiel': 'Événementiel',
+            '/factures': 'Facturation',
+            '/crm': 'CRM',
+            '/employes': 'Gestion Staff',
+            '/rh': 'RH'
+        };
+        
+        const moduleName = modules[path as keyof typeof modules];
+        if (moduleName) {
+            adminApi.logAction({
+                action: 'MODULE_VISIT',
+                category: 'METIER',
+                message: `A consulté le module : ${moduleName}`
+            }).catch(() => {});
+        }
+        
+        lastPathRef.current = path;
+    }, [location.pathname, user]);
+
+    return null;
+};
 
 const Layout = ({ children }: any) => {
     const { user, logout, refreshUser, loading } = useAuth();
@@ -154,7 +193,7 @@ const Layout = ({ children }: any) => {
         } catch (e) {
             console.error('Failed to load active modules', e);
         }
-    }, [authApi]);
+    }, []);
 
     const checkStatus = React.useCallback(async () => {
         try {
@@ -167,7 +206,14 @@ const Layout = ({ children }: any) => {
             logout();
             navigate('/login');
         }
-    }, [authApi, logout, navigate]);
+    }, [logout, navigate]);
+
+    React.useEffect(() => {
+        if (user && user.type !== 'admin') {
+            loadModules();
+            checkStatus();
+        }
+    }, [user, loadModules, checkStatus]);
 
     const refreshClientUnreadCount = React.useCallback(async () => {
         if (user && user.type !== 'admin') {
@@ -177,13 +223,6 @@ const Layout = ({ children }: any) => {
             } catch {}
         }
     }, [user]);
-
-    React.useEffect(() => {
-        if (user && user.type !== 'admin') {
-            loadModules();
-            checkStatus();
-        }
-    }, [user, loadModules, checkStatus]);
 
     React.useEffect(() => {
         if (!user) return;
@@ -275,6 +314,7 @@ const Layout = ({ children }: any) => {
 
     return (
         <div className="flex min-h-screen bg-[var(--bg-app)] text-[var(--text-primary)] transition-colors duration-300">
+            {user && user.type !== 'admin' && <ModuleTracker />}
             {/* Sidebar */}
             <motion.aside
                 animate={{ width: isCollapsed ? 72 : 248 }}
@@ -323,10 +363,11 @@ const Layout = ({ children }: any) => {
                 <nav className="flex-1 space-y-0.5 overflow-y-hidden">
                     <SidebarItem icon={LayoutDashboard} label="Dashboard" to="/" active={window.location.pathname === '/'} collapsed={isCollapsed} />
                     
-                    {user?.type === 'admin' ? (
+                    {user?.type === 'admin' || user?.role === 'superadmin' ? (
                         <>
                             {!isCollapsed && <div className="mt-5 mb-1 px-3 text-[9px] font-bold text-slate-600 dark:text-gray-400 uppercase tracking-widest">Administration</div>}
                             <SidebarItem icon={Users} label="Gestion Clients" to="/admin/clients" active={window.location.pathname.startsWith('/admin/clients')} collapsed={isCollapsed} />
+                            <SidebarItem icon={ShieldAlert} label="Journal Sentinel" to="/admin/sentinel" active={window.location.pathname === '/admin/sentinel'} collapsed={isCollapsed} />
                             <Link
                                 to="/admin/support"
                                 className={`group flex items-center ${isCollapsed ? 'justify-center' : 'gap-2'} ${isCollapsed ? 'px-0 py-1.5' : 'px-3 py-2'} rounded-lg transition-all ${
@@ -816,7 +857,7 @@ const DashboardView = () => {
                                 ? 'Vérifiez l\'état des serveurs et les logs de sécurité de la plateforme.' 
                                 : 'Une question sur le fonctionnement, une demande de modification ou mise à jour, une demande d\'ajout d\'un système de gestion, ou tout ce qui pourrait vous faciliter votre travail ? Contactez le support client.'}
                         </p>
-                        {user?.type === 'admin' ? (
+                        {user?.type === 'admin' || user?.role === 'superadmin' ? (
                             <button className="bg-[var(--text-primary)] text-[var(--bg-card)] px-8 py-4 rounded-xl font-bold text-sm hover:opacity-90 transition-all shadow-lg">
                                 Voir les logs
                             </button>
@@ -2186,12 +2227,6 @@ const AdminClientDetailView = () => {
                         >
                             Staff
                         </button>
-                        <button
-                            onClick={() => setActiveTab('audit')}
-                            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${activeTab === 'audit' ? 'bg-white text-black' : 'text-gray-400 hover:text-white'}`}
-                        >
-                            Journal d'activité
-                        </button>
                     </div>
 
                     {activeTab === 'collaborators' && (
@@ -2391,46 +2426,6 @@ const AdminClientDetailView = () => {
                                     </button>
                                 </div>
                             ))}
-                        </div>
-                    </div>
-                    )}
-
-                    {activeTab === 'audit' && (
-                    <div className="bg-[#111111] rounded-2xl p-8 border border-white/5">
-                        <div className="flex items-center justify-between mb-8">
-                            <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                                <ShieldCheck size={20} className="text-blue-400" />
-                                Journal d'activité
-                            </h2>
-                        </div>
-
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-left min-w-[840px]">
-                                <thead>
-                                    <tr className="text-xs font-bold text-gray-500 uppercase tracking-widest border-b border-white/5">
-                                        <th className="pb-4">Date</th>
-                                        <th className="pb-4">Action</th>
-                                        <th className="pb-4">Par</th>
-                                        <th className="pb-4">Cible</th>
-                                        <th className="pb-4">Ancienne valeur</th>
-                                        <th className="pb-4">Nouvelle valeur</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-white/5">
-                                    {auditLogs.length === 0 ? (
-                                        <tr><td colSpan={6} className="py-10 text-center text-gray-500">Aucune activité enregistrée.</td></tr>
-                                    ) : auditLogs.map((log: any) => (
-                                        <tr key={log.id}>
-                                            <td className="py-3 text-gray-400 text-sm">{new Date(log.created_at).toLocaleString()}</td>
-                                            <td className="py-3 text-white font-medium">{log.action}</td>
-                                            <td className="py-3 text-gray-300">{log.actor_name || log.user_id}</td>
-                                            <td className="py-3 text-gray-300">{log.target_name || log.target_user_id}</td>
-                                            <td className="py-3 text-gray-500 break-all">{log.old_value || '—'}</td>
-                                            <td className="py-3 text-gray-500 break-all">{log.new_value || '—'}</td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
                         </div>
                     </div>
                     )}
@@ -3127,6 +3122,7 @@ const App = () => (
                             <Route path="/crm" element={<CRMModule />} />
                             <Route path="/factures" element={<FacturesModule />} />
                             <Route path="/employes" element={<PostesEmployesModule />} />
+                            <Route path="/admin/sentinel" element={<SentinelJournal />} />
                             <Route path="/admin/clients" element={<AdminClientsView />} />
                             <Route path="/admin/clients/:id" element={<AdminClientDetailView />} />
                             <Route path="/admin/support" element={<SupportAdminView />} />

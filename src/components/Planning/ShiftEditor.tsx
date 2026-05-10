@@ -120,7 +120,8 @@ const ShiftEditor: React.FC<ShiftEditorProps> = ({
             ...shift,
             type,
             serviceType,
-            segments: finalSegments
+            segments: finalSegments,
+            isManual: true
         });
         onClose();
     };

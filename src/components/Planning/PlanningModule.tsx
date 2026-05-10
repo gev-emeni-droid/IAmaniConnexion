@@ -605,7 +605,16 @@ export const PlanningModule = () => {
         if (!planning || !confirm('Voulez-vous vraiment vider cette journée ?')) return;
         const newRows = planning.rows.map(row => ({
             ...row,
-            shifts: { ...row.shifts, [date]: { date, type: 'repos' as const, serviceType: 'none' as const, segments: [{ type: 'code' as const, label: 'REPOS' }] } }
+            shifts: { 
+                ...row.shifts, 
+                [date]: { 
+                    date, 
+                    type: 'repos' as const, 
+                    serviceType: 'none' as const, 
+                    segments: [{ type: 'code' as const, label: 'REPOS' }],
+                    isManual: true
+                } 
+            }
         }));
         savePlanning({ ...planning, rows: newRows });
         setOpenDayMenu(null);
