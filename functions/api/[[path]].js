@@ -99,7 +99,7 @@ const MONTHS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet'
 const adminCols = `id, email, name, username, password, created_at`;
 const clientCols = `id, name, email, username, password, is_temporary_password, status, last_login, created_at, company_name, logo_url, default_tva_rate, default_tva_custom_rate, tva_rates, enable_cover_count, account_manager_first_name, account_manager_last_name, account_manager_phone, account_manager_email, legal_form, siret, vat_number, company_address, company_postal_code, company_city, company_country, company_employee_count`;
 const collabCols = `id, client_id, email, username, name, role, status, created_at, modules_access`;
-const factureCols = `id, client_id, invoice_number, customer_name, amount, status, due_date, created_at, payload_json, billing_snapshot, total_ht, total_tva, total_ttc, already_paid, remaining_due, crm_contact_id, last_sent_email, last_sent_at`;
+const factureCols = `id, client_id, invoice_number, customer_name, amount, status, due_date, created_at, payload_json, billing_snapshot, total_ht, total_tva, total_ttc, already_paid, remaining_due, crm_contact_id`;
 const crmCols = `id, client_id, type, first_name, last_name, company_name, organizer_name, email, phone, address, postal_code, city, country, created_at, updated_at`;
 const eventCols = `id, client_id, calendar_id, type, phone, email, address, start_time, end_time, num_people, documents, first_name, last_name, company_name, organizer_name, taken_by_id, created_at`;
 const calendarCols = `id, client_id, month, year, status, created_at`;
@@ -134,7 +134,7 @@ const mapClient = (row) => {
     };
 };
 
-const mapFacture = (row) => ({ ...row, due_date: toISO(row.due_date), created_at: toISO(row.created_at), last_sent_at: toISO(row.last_sent_at) });
+const mapFacture = (row) => ({ ...row, due_date: toISO(row.due_date), created_at: toISO(row.created_at) });
 const mapEvent = (row) => ({ ...row, created_at: toISO(row.created_at), documents: typeof row.documents === 'string' ? JSON.parse(row.documents || '[]') : (row.documents || []) });
 const mapCrm = (row) => {
     let phone = row.phone;
