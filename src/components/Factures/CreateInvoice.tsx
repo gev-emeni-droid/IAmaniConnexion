@@ -708,8 +708,9 @@ body { margin: 0; padding: 0; background: #ffffff; }
         }
         // Enregistrement action print
         try {
-            if (saved.id && user?.clientId) {
-                await recordFactureAction(String(saved.id), String(user.clientId), 'print');
+            const finalId = currentInvoiceId || (typeof saved !== 'undefined' ? saved?.id : null);
+            if (finalId && user?.clientId) {
+                await recordFactureAction(String(finalId), String(user.clientId), 'print');
             }
         } catch (e) {
             // Optionnel : afficher une erreur ou ignorer
@@ -839,8 +840,9 @@ body { margin: 0; padding: 0; background: #ffffff; }
 
         // Enregistrement action download
         try {
-            if (saved.id && user?.clientId) {
-                await recordFactureAction(String(saved.id), String(user.clientId), 'download');
+            const finalId = currentInvoiceId || (typeof saved !== 'undefined' ? saved?.id : null);
+            if (finalId && user?.clientId) {
+                await recordFactureAction(String(finalId), String(user.clientId), 'download');
             }
         } catch (e) {
             // Optionnel : afficher une erreur ou ignorer
