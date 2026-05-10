@@ -615,19 +615,6 @@ body { margin: 0; padding: 0; background: #ffffff; }
         window.setTimeout(() => popup.print(), 250);
     }, [invoiceNumber]);
 
-    React.useEffect(() => {
-        if (!autoPrintToken || !dataLoaded || !previewHasContent) return;
-        const timer = window.setTimeout(() => openPrintWindow(), 500);
-        return () => window.clearTimeout(timer);
-    }, [autoPrintToken, openPrintWindow, dataLoaded, previewHasContent]);
-
-    React.useEffect(() => {
-        if (!autoDownloadToken || !dataLoaded || !previewHasContent) return;
-        const timer = window.setTimeout(() => {
-            handleDownloadPdf().catch(console.error);
-        }, 500);
-        return () => window.clearTimeout(timer);
-    }, [autoDownloadToken, handleDownloadPdf, dataLoaded, previewHasContent]);
 
     const buildInvoicePayload = React.useCallback(() => {
         const invoiceId = currentInvoiceId || (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : createLineId());
@@ -921,6 +908,20 @@ body { margin: 0; padding: 0; background: #ffffff; }
         settings.capital ? `Capital social: ${settings.capital}` : null,
         settings.ape ? `APE/NAF: ${settings.ape}` : null,
     ].filter(Boolean).join(' • ');
+
+    React.useEffect(() => {
+        if (!autoPrintToken || !dataLoaded || !previewHasContent) return;
+        const timer = window.setTimeout(() => openPrintWindow(), 500);
+        return () => window.clearTimeout(timer);
+    }, [autoPrintToken, openPrintWindow, dataLoaded, previewHasContent]);
+
+    React.useEffect(() => {
+        if (!autoDownloadToken || !dataLoaded || !previewHasContent) return;
+        const timer = window.setTimeout(() => {
+            handleDownloadPdf().catch(console.error);
+        }, 500);
+        return () => window.clearTimeout(timer);
+    }, [autoDownloadToken, handleDownloadPdf, dataLoaded, previewHasContent]);
 
     return (
         <div className="space-y-6">
