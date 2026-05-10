@@ -78,6 +78,9 @@ const generateId = () => {
     }
 };
 
+// hashPassword: async wrapper around bcryptjs hashSync so it can be awaited uniformly
+const hashPassword = (plain) => Promise.resolve(hashSync(plain, 10));
+
 const parseTvaRates = (raw) => {
     let rates = [20];
     try {
@@ -1011,7 +1014,10 @@ app.post('/admin/clients/:id/collaborators', async (c) => {
         await c.env.DB.prepare('INSERT INTO collaborators (id, client_id, name, email, username, password, role, modules_access) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
             .bind(id, c.req.param('id'), b.name, b.email, b.username, await hashPassword(pwd), b.role||'staff', JSON.stringify(b.modules_access||[])).run();
         return c.json({ success: true, id });
-    } catch (e) { return c.json({ error: 'Erreur' }, 500); }
+    } catch (e) {
+        console.error('[POST /collaborators] Error:', e?.message || e);
+        return c.json({ error: e?.message || 'Erreur création collaborateur' }, 500);
+    }
 });
 
 app.patch('/admin/clients/:id/collaborators/:cid', async (c) => {
