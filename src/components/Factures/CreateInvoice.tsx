@@ -364,9 +364,13 @@ export const CreateInvoice = ({ onBack, onShowHistory, onInvoiceSaved, initialIn
                     }, payloadRates))
                     : [];
 
-                // FALLBACK : Si on n'a pas de lignes mais qu'on a un montant global (vieilles factures ou erreur payload)
+                // FALLBACK : Si on n'a pas de lignes ou si elles sont toutes à 0, mais qu'on a un montant global
                 const globalAmount = Number(initialInvoice.total_ttc || initialInvoice.amount || parsedPayload.totalTtcBrut || 0);
-                if (restoredLines.length === 0 && globalAmount > 0) {
+                const hasRealContent = restoredLines.some(l => 
+                    Object.values(l.ttcByRate || {}).some(v => Number(v) > 0)
+                );
+
+                if (!hasRealContent && globalAmount > 0) {
                     const defaultRate = payloadRates[0] || 20;
                     restoredLines = [{
                         id: createLineId(),
@@ -913,7 +917,18 @@ body { margin: 0; padding: 0; background: #ffffff; }
     }, [autoPrintToken, openPrintWindow, dataLoaded, previewHasContent]);
 
     React.useEffect(() => {
-        if (!autoDownloadToken || !dataLoaded || !previewHasContent) return;
+        if (!autoDownloadToken) return;
+        
+        // Si on est en train de charger, on attend un peu
+        if (!dataLoaded || !previewHasContent) {
+            const timeout = window.setTimeout(() => {
+                if (!dataLoaded || !previewHasContent) {
+                    onDownloadComplete?.();
+                }
+            }, 5000); // 5s max avant d'abandonner le mode silencieux
+            return () => window.clearTimeout(timeout);
+        }
+
         const timer = window.setTimeout(async () => {
             try {
                 await handleDownloadPdf();
