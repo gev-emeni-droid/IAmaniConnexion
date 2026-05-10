@@ -671,10 +671,13 @@ body { margin: 0; padding: 0; background: #ffffff; }
             alert('Veuillez autoriser la fenêtre d’impression.');
             return;
         }
-        const saved = await saveCurrentInvoice();
-        if (!saved) {
-            popup.close();
-            return;
+        // On ne sauvegarde que si c'est une nouvelle facture
+        if (!currentInvoiceId) {
+            const saved = await saveCurrentInvoice();
+            if (!saved) {
+                popup.close();
+                return;
+            }
         }
         // Enregistrement action print
         try {
@@ -801,8 +804,11 @@ body { margin: 0; padding: 0; background: #ffffff; }
             return;
         }
 
-        const saved = await saveCurrentInvoice();
-        if (!saved) return;
+        // On ne sauvegarde que si c'est une nouvelle facture
+        if (!currentInvoiceId) {
+            const saved = await saveCurrentInvoice();
+            if (!saved) return;
+        }
 
         // Enregistrement action download
         try {

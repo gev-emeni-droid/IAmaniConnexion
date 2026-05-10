@@ -2621,7 +2621,7 @@ app.post('/facture', async (c) => {
         const dueDate = body.due_date || body.invoiceDate || null;
 
         await c.env.DB.prepare(`
-            INSERT INTO facture (id, client_id, invoice_number, customer_name, amount, status, due_date, total_ht, total_tva, total_ttc, already_paid, remaining_due, crm_contact_id, payload_json)
+            INSERT OR REPLACE INTO facture (id, client_id, invoice_number, customer_name, amount, status, due_date, total_ht, total_tva, total_ttc, already_paid, remaining_due, crm_contact_id, payload_json)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).bind(
             id,
