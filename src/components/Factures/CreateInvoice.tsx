@@ -698,9 +698,10 @@ body { margin: 0; padding: 0; background: #ffffff; }
             alert('Veuillez autoriser la fenêtre d’impression.');
             return;
         }
+        let saved: any = null;
         // On ne sauvegarde que si c'est une nouvelle facture
         if (!currentInvoiceId) {
-            const saved = await saveCurrentInvoice();
+            saved = await saveCurrentInvoice();
             if (!saved) {
                 popup.close();
                 return;
@@ -708,7 +709,7 @@ body { margin: 0; padding: 0; background: #ffffff; }
         }
         // Enregistrement action print
         try {
-            const finalId = currentInvoiceId || (typeof saved !== 'undefined' ? saved?.id : null);
+            const finalId = currentInvoiceId || saved?.id;
             if (finalId && user?.clientId) {
                 await recordFactureAction(String(finalId), String(user.clientId), 'print');
             }
@@ -832,15 +833,16 @@ body { margin: 0; padding: 0; background: #ffffff; }
             return;
         }
 
+        let saved: any = null;
         // On ne sauvegarde que si c'est une nouvelle facture
         if (!currentInvoiceId) {
-            const saved = await saveCurrentInvoice();
+            saved = await saveCurrentInvoice();
             if (!saved) return;
         }
 
         // Enregistrement action download
         try {
-            const finalId = currentInvoiceId || (typeof saved !== 'undefined' ? saved?.id : null);
+            const finalId = currentInvoiceId || saved?.id;
             if (finalId && user?.clientId) {
                 await recordFactureAction(String(finalId), String(user.clientId), 'download');
             }
