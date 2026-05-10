@@ -490,7 +490,11 @@ export const CreateInvoice = ({ onBack, onShowHistory, onInvoiceSaved, initialIn
     const displayTvaRates = activeTvaRates.length > 0 ? activeTvaRates : tvaRates;
 
     React.useEffect(() => {
-        if (!initialInvoice) return;
+        if (!initialInvoice) {
+            setDataLoaded(true); // Considéré chargé si vide
+            return;
+        }
+        setDataLoaded(false); // Reset pendant le chargement
         try {
             const parsedPayload = typeof initialInvoice.payload_json === 'string'
                 ? JSON.parse(initialInvoice.payload_json || '{}')
@@ -612,10 +616,10 @@ body { margin: 0; padding: 0; background: #ffffff; }
     }, [invoiceNumber]);
 
     React.useEffect(() => {
-        if (!autoPrintToken || !dataLoaded) return;
-        const timer = window.setTimeout(() => openPrintWindow(), 500);
+        if (!autoPrintToken || !dataLoaded || !previewHasContent) return;
+        const timer = window.setTimeout(() => openPrintWindow(), 800);
         return () => window.clearTimeout(timer);
-    }, [autoPrintToken, openPrintWindow, dataLoaded]);
+    }, [autoPrintToken, openPrintWindow, dataLoaded, previewHasContent]);
 
     const buildInvoicePayload = React.useCallback(() => {
         const invoiceId = currentInvoiceId || (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : createLineId());
