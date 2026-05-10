@@ -320,18 +320,80 @@ export const CreateInvoice = ({ onBack, onShowHistory, onInvoiceSaved, initialIn
 
             setCatalog(parsedCatalog);
             const nextRates = Array.isArray(s.tva_rates) && s.tva_rates.length > 0 ? s.tva_rates : [20];
-            setLines((prev) => {
-                const normalized = prev.length > 0 ? prev.map((line) => normalizeLineForRates(line, nextRates)) : [buildEmptyLine(nextRates)];
-                if (parsedCatalog[0] && normalized[0] && !normalized[0].label.trim()) {
-                    normalized[0] = { ...normalized[0], label: parsedCatalog[0].label };
+            
+            // Si on a un initialInvoice, on le traite ICI pour éviter les race conditions
+            if (initialInvoice) {
+                const parsedPayload = typeof initialInvoice.payload_json === 'string'
+                    ? JSON.parse(initialInvoice.payload_json || '{}')
+                    : (initialInvoice.payload_json || {});
+                
+                const snapshot = (() => {
+                    try {
+                        if (typeof initialInvoice.billing_snapshot === 'string') return JSON.parse(initialInvoice.billing_snapshot || '{}');
+                        return initialInvoice.billing_snapshot || parsedPayload.billing_snapshot || {};
+                    } catch {
+                        return parsedPayload.billing_snapshot || {};
+                    }
+                })();
+
+                if (snapshot && Object.keys(snapshot).length > 0) {
+                    setSettings((prev) => ({ ...prev, ...snapshot }));
                 }
-                return normalized;
-            });
+
+                const payloadRates = Array.isArray(snapshot?.tva_rates) && snapshot.tva_rates.length > 0 ? snapshot.tva_rates.map(Number) : nextRates;
+                setCurrentInvoiceId(String(initialInvoice.id || parsedPayload.id || ''));
+                setInvoiceNumber(String(parsedPayload.invoiceNumber || initialInvoice.invoice_number || ''));
+                setInvoiceDate(String(parsedPayload.invoiceDate || initialInvoice.due_date || toInputDate()));
+                setClientName(String(parsedPayload.clientName || initialInvoice.customer_name || ''));
+                setSelectedCrmContactId(String(parsedPayload.crmContactId || parsedPayload.crm_contact_id || initialInvoice.crm_contact_id || ''));
+                setClientAddress(String(parsedPayload.clientAddress || ''));
+                setClientCity(String(parsedPayload.clientCity || ''));
+                setClientPostalCode(String(parsedPayload.clientPostalCode || ''));
+                setClientCountry(String(parsedPayload.clientCountry || 'France'));
+                setRecipientEmail(String(parsedPayload.recipientEmail || ''));
+                setCoverCount(String(parsedPayload.coverCount || ''));
+                setAmountAlreadyPaid(String(parsedPayload.amountAlreadyPaid ?? initialInvoice.already_paid ?? ''));
+                setAmountMode(parsedPayload.amountMode === 'ht' ? 'ht' : 'ttc');
+
+                let restoredLines = Array.isArray(parsedPayload.lines) && parsedPayload.lines.length > 0
+                    ? parsedPayload.lines.map((line: any) => normalizeLineForRates({
+                        id: String(line.id || createLineId()),
+                        label: String(line.label || ''),
+                        quantity: Math.max(1, Number(line.quantity || 1)),
+                        ttcByRate: line.ttcByRate || Object.fromEntries(payloadRates.map((rate: number) => [rate, 0])),
+                    }, payloadRates))
+                    : [];
+
+                // FALLBACK : Si on n'a pas de lignes mais qu'on a un montant global (vieilles factures ou erreur payload)
+                const globalAmount = Number(initialInvoice.total_ttc || initialInvoice.amount || parsedPayload.totalTtcBrut || 0);
+                if (restoredLines.length === 0 && globalAmount > 0) {
+                    const defaultRate = payloadRates[0] || 20;
+                    restoredLines = [{
+                        id: createLineId(),
+                        label: 'Prestation',
+                        quantity: 1,
+                        ttcByRate: { [defaultRate]: globalAmount } as Record<number, number>
+                    }];
+                } else if (restoredLines.length === 0) {
+                    restoredLines = [buildEmptyLine(payloadRates, parsedCatalog[0]?.label || '')];
+                }
+                setLines(restoredLines);
+            } else {
+                setLines((prev) => {
+                    const normalized = prev.length > 0 ? prev.map((line) => normalizeLineForRates(line, nextRates)) : [buildEmptyLine(nextRates)];
+                    if (parsedCatalog[0] && normalized[0] && !normalized[0].label.trim()) {
+                        normalized[0] = { ...normalized[0], label: parsedCatalog[0].label };
+                    }
+                    return normalized;
+                });
+            }
+
             setDataLoaded(true);
         } catch (e) {
             console.error(e);
+            setDataLoaded(true);
         }
-    }, [user?.clientId, user?.companyName, user?.id]);
+    }, [user?.clientId, user?.companyName, user?.id, initialInvoice]);
 
     React.useEffect(() => {
         loadBillingData();
@@ -489,71 +551,6 @@ export const CreateInvoice = ({ onBack, onShowHistory, onInvoiceSaved, initialIn
     const activeTvaRates = tvaRates.filter((rate) => lineSummaries.some((line) => line.rateDetails.some((detail) => detail.rate === rate && detail.ht > 0)));
     const displayTvaRates = activeTvaRates.length > 0 ? activeTvaRates : tvaRates;
 
-    React.useEffect(() => {
-        if (!initialInvoice) {
-            setDataLoaded(true); // Considéré chargé si vide
-            return;
-        }
-        setDataLoaded(false); // Reset pendant le chargement
-        try {
-            const parsedPayload = typeof initialInvoice.payload_json === 'string'
-                ? JSON.parse(initialInvoice.payload_json || '{}')
-                : (initialInvoice.payload_json || {});
-            const snapshot = (() => {
-                try {
-                    if (typeof initialInvoice.billing_snapshot === 'string') return JSON.parse(initialInvoice.billing_snapshot || '{}');
-                    return initialInvoice.billing_snapshot || parsedPayload.billing_snapshot || {};
-                } catch {
-                    return parsedPayload.billing_snapshot || {};
-                }
-            })();
-            if (snapshot && Object.keys(snapshot).length > 0) {
-                setSettings((prev) => ({ ...prev, ...snapshot }));
-            }
-            const payloadRates = Array.isArray(snapshot?.tva_rates) && snapshot.tva_rates.length > 0 ? snapshot.tva_rates.map(Number) : tvaRates;
-            setCurrentInvoiceId(String(initialInvoice.id || parsedPayload.id || ''));
-            setInvoiceNumber(String(parsedPayload.invoiceNumber || initialInvoice.invoice_number || ''));
-            setInvoiceDate(String(parsedPayload.invoiceDate || initialInvoice.due_date || toInputDate()));
-            setClientName(String(parsedPayload.clientName || initialInvoice.customer_name || ''));
-            setSelectedCrmContactId(String(parsedPayload.crmContactId || parsedPayload.crm_contact_id || initialInvoice.crm_contact_id || ''));
-            setClientAddress(String(parsedPayload.clientAddress || ''));
-            setClientCity(String(parsedPayload.clientCity || ''));
-            setClientPostalCode(String(parsedPayload.clientPostalCode || ''));
-            setClientCountry(String(parsedPayload.clientCountry || 'France'));
-            setRecipientEmail(String(parsedPayload.recipientEmail || ''));
-            setCoverCount(String(parsedPayload.coverCount || ''));
-            setAmountAlreadyPaid(String(parsedPayload.amountAlreadyPaid ?? initialInvoice.already_paid ?? ''));
-            setAmountMode(parsedPayload.amountMode === 'ht' ? 'ht' : 'ttc');
-            let restoredLines = Array.isArray(parsedPayload.lines) && parsedPayload.lines.length > 0
-                ? parsedPayload.lines.map((line: any) => normalizeLineForRates({
-                    id: String(line.id || createLineId()),
-                    label: String(line.label || ''),
-                    quantity: Math.max(1, Number(line.quantity || 1)),
-                    ttcByRate: line.ttcByRate || Object.fromEntries(payloadRates.map((rate: number) => [rate, 0])),
-                }, payloadRates))
-                : [];
-
-            // FALLBACK : Si on n'a pas de lignes mais qu'on a un montant global (vieilles factures ou erreur payload)
-            const globalAmount = Number(initialInvoice.total_ttc || initialInvoice.amount || parsedPayload.totalTtcBrut || 0);
-            if (restoredLines.length === 0 && globalAmount > 0) {
-                const defaultRate = payloadRates[0] || 20;
-                restoredLines = [{
-                    id: createLineId(),
-                    label: 'Prestation',
-                    quantity: 1,
-                    ttcByRate: { [defaultRate]: globalAmount } as Record<number, number>
-                }];
-            } else if (restoredLines.length === 0) {
-                restoredLines = [buildEmptyLine(payloadRates, catalog[0]?.label || '')];
-            }
-
-            setLines(restoredLines);
-            setDataLoaded(true);
-        } catch (e) {
-            console.error(e);
-            setDataLoaded(true);
-        }
-    }, [initialInvoice]);
 
     const openPrintWindow = React.useCallback((targetWindow?: Window | null) => {
         const popup = targetWindow ?? window.open('', '_blank', 'width=900,height=1200');
