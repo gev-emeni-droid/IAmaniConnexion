@@ -248,7 +248,7 @@ const getCRMDisplayName = (contact: CRMContactSuggestion) => {
     return contact.company_name || contact.organizer_name || [contact.first_name, contact.last_name].filter(Boolean).join(' ').trim() || 'Client';
 };
 
-export const CreateInvoice = ({ onBack, onShowHistory, onInvoiceSaved, initialInvoice, autoPrintToken }: CreateInvoiceProps) => {
+export const CreateInvoice = ({ onBack, onShowHistory, onInvoiceSaved, initialInvoice, autoPrintToken, autoDownloadToken }: CreateInvoiceProps & { autoDownloadToken?: number }) => {
     const { user } = useAuth();
     const [settings, setSettings] = React.useState<BillingSettings>({});
     const [catalog, setCatalog] = React.useState<CatalogItem[]>([]);
@@ -617,9 +617,17 @@ body { margin: 0; padding: 0; background: #ffffff; }
 
     React.useEffect(() => {
         if (!autoPrintToken || !dataLoaded || !previewHasContent) return;
-        const timer = window.setTimeout(() => openPrintWindow(), 800);
+        const timer = window.setTimeout(() => openPrintWindow(), 500);
         return () => window.clearTimeout(timer);
     }, [autoPrintToken, openPrintWindow, dataLoaded, previewHasContent]);
+
+    React.useEffect(() => {
+        if (!autoDownloadToken || !dataLoaded || !previewHasContent) return;
+        const timer = window.setTimeout(() => {
+            handleDownloadPdf().catch(console.error);
+        }, 500);
+        return () => window.clearTimeout(timer);
+    }, [autoDownloadToken, handleDownloadPdf, dataLoaded, previewHasContent]);
 
     const buildInvoicePayload = React.useCallback(() => {
         const invoiceId = currentInvoiceId || (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : createLineId());

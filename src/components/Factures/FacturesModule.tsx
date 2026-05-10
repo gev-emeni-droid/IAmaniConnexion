@@ -9,6 +9,7 @@ export const FacturesModule = () => {
     const [selectedInvoice, setSelectedInvoice] = React.useState<any>(null);
     const [historyRefreshKey, setHistoryRefreshKey] = React.useState(0);
     const [autoPrintToken, setAutoPrintToken] = React.useState(0);
+    const [autoDownloadToken, setAutoDownloadToken] = React.useState(0);
     const [showInfoModal, setShowInfoModal] = React.useState(true);
     const [previewInvoice, setPreviewInvoice] = React.useState<any>(null);
 
@@ -23,7 +24,7 @@ export const FacturesModule = () => {
                     }}
                     onDownloadInvoice={(invoice) => {
                         setSelectedInvoice(invoice);
-                        setAutoPrintToken(Date.now());
+                        setAutoDownloadToken(Date.now());
                         setView('create');
                     }}
                 />
@@ -34,6 +35,7 @@ export const FacturesModule = () => {
             <CreateInvoice
                 initialInvoice={selectedInvoice}
                 autoPrintToken={autoPrintToken}
+                autoDownloadToken={autoDownloadToken}
                 onShowHistory={() => setView('history')}
                 onInvoiceSaved={() => setHistoryRefreshKey((k) => k + 1)}
             />
