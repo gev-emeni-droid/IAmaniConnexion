@@ -315,8 +315,17 @@ const Layout = ({ children }: any) => {
     };
 
     const isModuleActive = (name: string) => {
-        if (user?.type === 'admin') return false; // Admin doesn't use modules
-        return activeModules.includes(name);
+        if (!user) return false;
+        if (user.type === 'admin') return false; // Admin uses a separate hardcoded section
+        
+        // 1. Check live modules fetched from server (most accurate)
+        if (activeModules.length > 0) {
+            return activeModules.includes(name);
+        }
+
+        // 2. Fallback to JWT permissions (immediate display during loading)
+        const jwtModules = (user as any).modules || user.modules_access || [];
+        return jwtModules.includes(name);
     };
 
     return (
@@ -1873,13 +1882,23 @@ const AdminClientDetailView = () => {
     if (loading) return <div className="text-center py-20 text-gray-500">Chargement...</div>;
     if (!client) return <div className="text-center py-20 text-gray-500">Client introuvable</div>;
 
-    const handleAddStaffType = async () => {
+    const handleAddStaffType = async (e?: React.FormEvent) => {
+        if (e) e.preventDefault();
         if (!newStaffTypeName.trim()) return;
+        if (!id) {
+            console.error('No client ID found in URL parameters');
+            alert('ID client manquant. Veuillez rafraîchir la page.');
+            return;
+        }
+
         try {
-            await adminApi.createStaffType(id!, { name: newStaffTypeName.trim() });
+            console.log('Creating staff type for client:', id, 'name:', newStaffTypeName.trim());
+            await adminApi.createStaffType(id, { name: newStaffTypeName.trim() });
             setNewStaffTypeName('');
-            loadData();
+            await loadData();
+            console.log('Staff type created and data reloaded');
         } catch (e: any) {
+            console.error('Error creating staff type:', e);
             alert(e?.message || 'Erreur lors de la création de la catégorie.');
         }
     };
@@ -2319,20 +2338,21 @@ const AdminClientDetailView = () => {
                                 <Briefcase size={20} className="text-orange-400" />
                                 Catégories de Staff
                             </h2>
-                            <div className="flex items-center gap-2">
+                            <form onSubmit={handleAddStaffType} className="flex items-center gap-2">
                                 <input
                                     value={newStaffTypeName}
                                     onChange={(e) => setNewStaffTypeName(e.target.value)}
                                     placeholder="Nouvelle catégorie"
-                                    className="bg-black border border-white/10 rounded-lg px-3 py-2 text-white text-sm outline-none focus:border-white"
+                                    className="bg-black border border-white/10 rounded-lg px-3 py-2 text-white text-sm outline-none focus:border-white w-48"
                                 />
                                 <button
-                                    onClick={handleAddStaffType}
-                                    className="text-sm font-bold text-white hover:text-gray-300 flex items-center gap-2 transition-all"
+                                    type="submit"
+                                    disabled={!newStaffTypeName.trim()}
+                                    className="text-sm font-bold text-white hover:text-gray-300 flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     <Plus size={16} /> Ajouter une catégorie
                                 </button>
-                            </div>
+                            </form>
                         </div>
 
                         <div className="overflow-hidden">

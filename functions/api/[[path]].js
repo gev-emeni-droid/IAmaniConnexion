@@ -789,15 +789,49 @@ app.get('/me/modules', async (c) => {
     try {
         const user = await getUserFromReq(c);
         if (!user) return c.json([], 401);
+        
         if (user.type === 'admin') return c.json(adminModules);
-        const ownerId = user.type === 'collaborator' ? user.client_id : user.id;
-        const rows = await safeQuery(c, 'SELECT module_name, is_active FROM client_modules WHERE client_id = ?', [ownerId]);
-        if (user.type === 'collaborator') {
-            const active = rows.filter(r => r.is_active).map(r => r.module_name);
-            return c.json(user.modules.filter(m => active.includes(m)).map(m => ({ module_name: m, is_active: 1 })));
+
+        // Robust clientId resolution (handle underscore or camelCase from JWT)
+        const ownerId = user.type === 'collaborator' ? (user.client_id || user.clientId) : user.id;
+        
+        if (!ownerId) {
+            console.error('[GET /me/modules] No ownerId found for user:', user.id, user.type);
+            return c.json([]);
         }
-        return c.json(rows);
-    } catch (e) { return c.json([]); }
+
+        const establishmentModules = await safeQuery(c, 'SELECT module_name, is_active FROM client_modules WHERE client_id = ?', [ownerId]);
+        const activeInEstablishment = establishmentModules.filter(r => Number(r.is_active) === 1).map(r => r.module_name);
+
+        if (user.type === 'collaborator') {
+            const collabData = await safeFirst(c, 'SELECT modules_access FROM collaborators WHERE id = ?', [user.id]);
+            const permissions = typeof collabData?.modules_access === 'string' 
+                ? JSON.parse(collabData.modules_access || '[]') 
+                : (collabData?.modules_access || []);
+            
+            // Logic: if establishment has NO modules defined in client_modules table, 
+            // we assume all modules are available (backward compatibility) OR we filter strictly.
+            // Let's be helpful: if the list is empty, we don't block everything if it's an old setup.
+            const filtered = permissions.filter((m) => {
+                // If the establishment has explicitly configured modules, we check against them
+                if (activeInEstablishment.length > 0) {
+                    return activeInEstablishment.includes(m);
+                }
+                // Otherwise (old establishment without client_modules setup), we allow what's in permissions
+                return true;
+            });
+
+            return c.json(filtered.map((m) => ({ 
+                module_name: m, 
+                is_active: 1 
+            })));
+        }
+
+        return c.json(establishmentModules);
+    } catch (e) {
+        console.error('GET /me/modules error:', e);
+        return c.json([]); 
+    }
 });
 
 // --- ADMIN ---
@@ -866,19 +900,51 @@ app.patch('/admin/clients/:id', async (c) => {
     try {
         const user = await getUserFromReq(c);
         if (!user || user.type !== 'admin') return c.json({ error: 'Accès refusé' }, 401);
+        const id = c.req.param('id');
         const b = await c.req.json();
-        await c.env.DB.prepare(`UPDATE clients SET name=?, email=?, username=?, company_name=?, logo_url=?, tva_rates=?, enable_cover_count=?, status=?, account_manager_first_name=?, account_manager_last_name=?, account_manager_phone=?, account_manager_email=?, legal_form=?, siret=?, vat_number=?, company_address=?, company_postal_code=?, company_city=?, company_country=?, company_employee_count=? WHERE id=?`)
-            .bind(b.name||'', b.email||'', b.username||'', b.company_name||'', b.logo_url||null, JSON.stringify(b.tva_rates||[20]), b.enable_cover_count?1:0, b.status||'active', b.account_manager_first_name||'', b.account_manager_last_name||'', b.account_manager_phone||'', b.account_manager_email||'', b.legal_form||'', b.siret||'', b.vat_number||'', b.company_address||'', b.company_postal_code||'', b.company_city||'', b.company_country||'France', Number(b.company_employee_count||0), c.req.param('id')).run();
+        
+        // Build dynamic UPDATE query
+        const allowedFields = [
+            'name', 'email', 'username', 'company_name', 'logo_url', 'tva_rates', 
+            'enable_cover_count', 'status', 'account_manager_first_name', 
+            'account_manager_last_name', 'account_manager_phone', 'account_manager_email',
+            'legal_form', 'siret', 'vat_number', 'company_address', 
+            'company_postal_code', 'company_city', 'company_country', 
+            'company_employee_count'
+        ];
+
+        const updates = [];
+        const values = [];
+
+        for (const field of allowedFields) {
+            if (field in b) {
+                updates.push(`${field} = ?`);
+                let val = b[field];
+                if (field === 'tva_rates') val = JSON.stringify(val || [20]);
+                if (field === 'enable_cover_count') val = val ? 1 : 0;
+                if (field === 'company_employee_count') val = Number(val || 0);
+                values.push(val);
+            }
+        }
+
+        if (updates.length === 0) return c.json({ success: true, message: 'Rien à mettre à jour' });
+
+        values.push(id);
+        const sql = `UPDATE clients SET ${updates.join(', ')} WHERE id = ?`;
+        await c.env.DB.prepare(sql).bind(...values).run();
         
         await insertAuditLog(c, {
             action: 'UPDATE_CLIENT',
             category: LOG_CATEGORIES.GLOBAL,
             severity: LOG_SEVERITIES.INFO,
-            newValue: `Fiche client modifiée : ${b.company_name || b.name}`
+            newValue: `Fiche client modifiée (Champs : ${Object.keys(b).join(', ')}) : ${id}`
         });
 
         return c.json({ success: true });
-    } catch (e) { return c.json({ error: e.message }, 500); }
+    } catch (e) { 
+        console.error('PATCH /admin/clients/:id error:', e);
+        return c.json({ error: e.message }, 500); 
+    }
 });
 
 app.delete('/admin/clients/:id', async (c) => {
@@ -914,13 +980,53 @@ app.put('/admin/clients/:id/modules', async (c) => {
     try {
         const user = await getUserFromReq(c);
         if (!user || user.type !== 'admin') return c.json({ error: 'Accès refusé' }, 401);
+        const clientId = c.req.param('id');
         const body = await c.req.json();
+        
+        if (!Array.isArray(body)) return c.json({ error: 'Format invalide' }, 400);
+
+        // We use a batch for atomicity: delete old entries and insert only active ones
+        // This is much safer than INSERT OR REPLACE if unique constraints are missing
+        const statements = [
+            c.env.DB.prepare('DELETE FROM client_modules WHERE client_id = ?').bind(clientId)
+        ];
+
         for (const m of body) {
-            await c.env.DB.prepare('INSERT OR REPLACE INTO client_modules (client_id, module_name, is_active) VALUES (?, ?, ?)')
-                .bind(c.req.param('id'), m.module_name||m.name, m.is_active?1:0).run();
+            const mName = m.module_name || m.name;
+            // Handle both 'is_active' (backend format) and 'active' (frontend format)
+            const isActive = m.is_active === 1 || m.is_active === true || m.active === true || m.active === 1;
+            
+            if (mName && isActive) {
+                statements.push(
+                    c.env.DB.prepare('INSERT INTO client_modules (client_id, module_name, is_active) VALUES (?, ?, 1)')
+                        .bind(clientId, mName)
+                );
+            }
         }
+
+        await c.env.DB.batch(statements);
+        
+        await insertAuditLog(c, {
+            action: 'MODIFICATION_CLIENT',
+            category: 'CLIENTS',
+            severity: 'info',
+            clientId: clientId,
+            newValue: `Mise à jour des modules pour le client ${clientId}`
+        });
+
         return c.json({ success: true });
-    } catch (e) { return c.json({ error: 'Erreur' }, 500); }
+    } catch (e) {
+        console.error('[PUT /admin/clients/:id/modules] Error:', e);
+        try {
+            await insertAuditLog(c, {
+                action: 'ERREUR_SYSTEME',
+                category: 'SYSTEME',
+                severity: 'alert',
+                newValue: `Erreur mise à jour modules client ${c.req.param('id')} : ${e.message}`
+            });
+        } catch (logErr) {}
+        return c.json({ error: e.message || 'Erreur lors de la mise à jour des modules' }, 500);
+    }
 });
 
 app.get('/admin/clients/:id/spaces', async (c) => {
@@ -1031,7 +1137,18 @@ app.patch('/admin/clients/:id/collaborators/:cid', async (c) => {
         q += ' WHERE id=? AND client_id=?'; p.push(c.req.param('cid'), c.req.param('id'));
         await c.env.DB.prepare(q).bind(...p).run();
         return c.json({ success: true });
-    } catch (e) { return c.json({ error: 'Erreur' }, 500); }
+    } catch (e) {
+        console.error('[PATCH /collaborators] Error:', e?.message || e);
+        try {
+            await insertAuditLog(c, {
+                action: 'ERREUR_SYSTEME',
+                category: 'SYSTEME',
+                severity: 'alert',
+                newValue: `Erreur lors de la modification d'un collaborateur : ${e.message}`
+            });
+        } catch (logErr) {}
+        return c.json({ error: e?.message || 'Erreur modification collaborateur' }, 500);
+    }
 });
 
 app.delete('/admin/clients/:id/collaborators/:cid', async (c) => {
@@ -1040,7 +1157,18 @@ app.delete('/admin/clients/:id/collaborators/:cid', async (c) => {
         if (!user || user.type !== 'admin') return c.json({ error: 'Accès refusé' }, 401);
         await c.env.DB.prepare('DELETE FROM collaborators WHERE id=? AND client_id=?').bind(c.req.param('cid'), c.req.param('id')).run();
         return c.json({ success: true });
-    } catch (e) { return c.json({ error: 'Erreur' }, 500); }
+    } catch (e) {
+        console.error('[DELETE /collaborators] Error:', e?.message || e);
+        try {
+            await insertAuditLog(c, {
+                action: 'ERREUR_SYSTEME',
+                category: 'SYSTEME',
+                severity: 'alert',
+                newValue: `Erreur lors de la suppression d'un collaborateur : ${e.message}`
+            });
+        } catch (logErr) {}
+        return c.json({ error: e?.message || 'Erreur suppression collaborateur' }, 500);
+    }
 });
 
 app.post('/admin/clients/:id/collaborators/:cid/reset-password', async (c) => {
@@ -1053,7 +1181,18 @@ app.post('/admin/clients/:id/collaborators/:cid/reset-password', async (c) => {
         await c.env.DB.prepare('UPDATE collaborators SET password=? WHERE id=?').bind(await hashPassword(pwd), collab.id).run();
         await sendEmail(c, { to: collab.email, subject: 'Accès Collaborateur IAmani', html: renderEmail(`<p>Username: ${collab.username}<br>Password: ${pwd}</p>`, 'Identifiants') });
         return c.json({ success: true });
-    } catch (e) { return c.json({ error: 'Erreur' }, 500); }
+    } catch (e) {
+        console.error('[POST /collaborators/reset-password] Error:', e?.message || e);
+        try {
+            await insertAuditLog(c, {
+                action: 'ERREUR_SYSTEME',
+                category: 'SYSTEME',
+                severity: 'alert',
+                newValue: `Erreur lors du reset password collaborateur : ${e.message}`
+            });
+        } catch (logErr) {}
+        return c.json({ error: e?.message || 'Erreur reset password' }, 500);
+    }
 });
 
 app.post('/admin/clients/:id/reset-password', async (c) => {
