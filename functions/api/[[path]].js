@@ -1202,7 +1202,7 @@ app.post('/admin/clients/:id/reset-password', async (c) => {
         const cl = await safeFirst(c, 'SELECT * FROM clients WHERE id = ?', [c.req.param('id')]);
         if (!cl) return c.json({ error: '404' }, 404);
         const pwd = Math.random().toString(36).slice(-8);
-        await c.env.DB.prepare('UPDATE clients SET password=?, is_temporary_password=1, must_change_password=1 WHERE id=?').bind(await hashPassword(pwd), cl.id).run();
+        await c.env.DB.prepare('UPDATE clients SET password=?, is_temporary_password=1, status="active" WHERE id=?').bind(await hashPassword(pwd), cl.id).run();
         await sendEmail(c, { to: cl.email, subject: 'Accès IAmani', html: renderEmail(`<p>Identifiant: ${cl.username||cl.email}<br>Mot de passe: ${pwd}</p>`, 'Identifiants') });
         return c.json({ success: true });
     } catch (e) { return c.json({ error: 'Erreur' }, 500); }
@@ -1215,7 +1215,7 @@ app.post('/admin/clients/:id/force-reset-password', async (c) => {
         const cl = await safeFirst(c, 'SELECT * FROM clients WHERE id = ?', [c.req.param('id')]);
         if (!cl) return c.json({ error: '404' }, 404);
         const pwd = Math.random().toString(36).slice(-10);
-        await c.env.DB.prepare('UPDATE clients SET password=?, is_temporary_password=1, must_change_password=1 WHERE id=?').bind(await hashPassword(pwd), cl.id).run();
+        await c.env.DB.prepare('UPDATE clients SET password=?, is_temporary_password=1, status="active" WHERE id=?').bind(await hashPassword(pwd), cl.id).run();
         await sendEmail(c, { to: cl.email, subject: 'Reset forcé IAmani', html: renderEmail(`<p>Identifiant: ${cl.username||cl.email}<br>Nouveau mot de passe: ${pwd}</p>`, 'Sécurité') });
         return c.json({ success: true });
     } catch (e) { return c.json({ error: 'Erreur' }, 500); }
