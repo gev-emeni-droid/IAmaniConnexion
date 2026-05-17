@@ -255,14 +255,6 @@ export const PostesEmployesModule = () => {
                         <Plus size={18} /> Ajouter un poste
                     </button>
                 )}
-                {activeTab === 'employees' && (
-                    <button 
-                        onClick={() => openEmployeeModal()}
-                        className="px-5 py-2.5 rounded-xl bg-black text-white dark:bg-white dark:text-black font-bold hover:opacity-90 inline-flex items-center gap-2 transition-all shadow-lg"
-                    >
-                        <Plus size={18} /> Ajouter un employé
-                    </button>
-                )}
             </header>
 
             <div className="bg-white dark:bg-[#0A0A0A] border border-gray-200 dark:border-white/10 rounded-2xl p-2 inline-flex gap-2 transition-colors duration-200">
