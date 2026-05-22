@@ -316,9 +316,7 @@ export const PostesEmployesModule = () => {
                                 className="w-full bg-slate-50 dark:bg-black border border-gray-200 dark:border-white/10 rounded-xl pl-9 pr-4 py-3 text-slate-900 dark:text-white outline-none focus:border-slate-400 dark:focus:border-white text-sm transition-colors duration-200"
                             />
                         </div>
-                        <button onClick={openCreateEmployee} className="px-5 py-3 rounded-xl bg-black text-white dark:bg-white dark:text-black font-bold hover:opacity-90 inline-flex items-center gap-2 transition-colors duration-200">
-                            <Plus size={16} /> Ajouter un employé
-                        </button>
+
                     </div>
 
                     <div className="bg-white dark:bg-[#0A0A0A] border border-gray-200 dark:border-white/10 rounded-2xl overflow-hidden transition-colors duration-200">
