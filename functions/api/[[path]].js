@@ -9,6 +9,67 @@ import autoTable from 'jspdf-autotable';
 export const app = new Hono().basePath('/api');
 app.use('*', cors());
 
+// Middleware: Blocage IP
+app.use('*', async (c, next) => {
+    const ip = c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || c.req.header('x-real-ip') || 'unknown';
+    try {
+        const db = c.env.DB;
+        const isBanned = await db.prepare('SELECT 1 FROM banned_ips WHERE ip_address = ?').bind(ip).first();
+        if (isBanned) {
+            return c.json({ error: 'Accès interdit : Votre adresse IP a été bloquée.' }, 403);
+        }
+    } catch (e) {
+        // Ignorer si la table n'est pas encore créée
+    }
+    await next();
+});
+
+// Middleware: Capture Logs
+app.use('*', async (c, next) => {
+    const path = c.req.path;
+    const method = c.req.method;
+    
+    // Ignore GET requests, CORS OPTIONS, and the log-action routes to prevent infinite loop
+    if (method === 'GET' || method === 'OPTIONS' || path.includes('/api/admin/sentinel/log-action') || path.includes('/api/admin/sentinel/ban-ip')) {
+        return await next();
+    }
+    
+    // Clone request to read body
+    const reqClone = c.req.raw.clone();
+    let payload = null;
+    try {
+        const contentType = reqClone.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+            payload = await reqClone.json();
+            if (payload && payload.password) {
+                payload = { ...payload, password: '***' };
+            }
+        }
+    } catch(e) {}
+    
+    await next();
+    
+    // Log if successful and user is available
+    if (c.res.status >= 200 && c.res.status < 400 && c.get('user')) {
+        const user = c.get('user');
+        c.executionCtx.waitUntil((async () => {
+            try {
+                await insertAuditLog(c, {
+                    userId: user.id || 'system',
+                    targetUserId: null,
+                    clientId: user.clientId || null,
+                    action: `HTTP_${method}_${path.split('/').pop()?.toUpperCase() || 'ACTION'}`,
+                    category: LOG_CATEGORIES.BUSINESS,
+                    payloadJson: payload ? JSON.stringify(payload) : null,
+                    ipAddress: c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || c.req.header('x-real-ip') || 'unknown',
+                    country: c.req.header('cf-ipcountry') || 'FR',
+                    userAgent: c.req.header('user-agent') || 'unknown'
+                });
+            } catch(e) {}
+        })());
+    }
+});
+
 app.onError(async (err, c) => {
     const route = `${c.req.method} ${c.req.path}`;
     console.error(`[CRITICAL ERROR] ${route}:`, err);
@@ -271,12 +332,13 @@ const insertAuditLog = async (c, params) => {
     try {
         const user = await getUserFromReq(c);
         const userId = user?.id || 'système';
-        const ip = c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || 'Non renseignée';
-        const ua = c.req.header('user-agent') || 'Non renseigné';
+        const ip = params.ipAddress || c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || 'Non renseignée';
+        const ua = params.userAgent || c.req.header('user-agent') || 'Non renseigné';
+        const country = params.country || c.req.header('cf-ipcountry') || 'FR';
         
         await c.env.DB.prepare(`
-            INSERT INTO audit_logs (id, user_id, target_user_id, client_id, action, category, severity, old_value, new_value, ip_address, user_agent, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            INSERT INTO audit_logs (id, user_id, target_user_id, client_id, action, category, severity, old_value, new_value, ip_address, user_agent, payload_json, country, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         `).bind(
             generateId().substring(0, 12),
             userId,
@@ -288,7 +350,9 @@ const insertAuditLog = async (c, params) => {
             params.oldValue || '',
             params.newValue || `Action système sur ${c.req.method} ${c.req.path}`,
             ip,
-            ua
+            ua,
+            params.payloadJson || null,
+            country
         ).run();
     } catch (e) {
         console.error('Erreur lors de la journalisation:', e.message);
@@ -395,6 +459,15 @@ const propagatePlanningChanges = async (c, ownerId, changedEmployeeIds) => {
 const ensureAuditLogsSchema = async (c) => {
     try {
         const db = c.env.DB;
+        
+        await db.prepare(`CREATE TABLE IF NOT EXISTS banned_ips (
+            id TEXT PRIMARY KEY,
+            ip_address TEXT UNIQUE NOT NULL,
+            reason TEXT,
+            banned_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            banned_by TEXT
+        )`).run();
+
         const info = await db.prepare('PRAGMA table_info(audit_logs)').all();
         const cols = (info.results || []).map(r => r.name);
         
@@ -410,8 +483,14 @@ const ensureAuditLogsSchema = async (c) => {
         if (!cols.includes('user_agent')) {
             await db.prepare("ALTER TABLE audit_logs ADD COLUMN user_agent TEXT").run();
         }
+        if (!cols.includes('payload_json')) {
+            await db.prepare("ALTER TABLE audit_logs ADD COLUMN payload_json TEXT").run();
+        }
+        if (!cols.includes('country')) {
+            await db.prepare("ALTER TABLE audit_logs ADD COLUMN country TEXT").run();
+        }
     } catch (e) {
-        console.error('Schema migration error (audit_logs):', e);
+        console.error('Schema migration error (audit_logs/banned_ips):', e);
     }
 };
 
@@ -1341,6 +1420,45 @@ app.post('/admin/sentinel/log-action', async (c) => {
     } catch (e) {
         console.error('Log-action error:', e);
         return c.json({ error: 'Erreur lors de l\'enregistrement du log' }, 500);
+    }
+});
+
+app.post('/admin/sentinel/ban-ip', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user || user.type !== 'admin') return c.json({ error: 'Accès refusé' }, 403);
+        
+        const { ip, reason } = await c.req.json();
+        if (!ip) return c.json({ error: 'IP address is required' }, 400);
+        
+        const db = c.env.DB;
+        
+        await db.prepare(`
+            INSERT INTO banned_ips (id, ip_address, reason, banned_by)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(ip_address) DO UPDATE SET reason = excluded.reason, banned_at = CURRENT_TIMESTAMP, banned_by = excluded.banned_by
+        `).bind(
+            generateId(),
+            ip,
+            reason || 'Banned by admin',
+            user.id
+        ).run();
+        
+        // Log this action
+        await insertAuditLog(c, {
+            action: 'BAN_IP',
+            category: 'SECURITE',
+            severity: 'alert',
+            newValue: `Banned IP: ${ip}`,
+            ipAddress: c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || 'unknown',
+            country: c.req.header('cf-ipcountry') || 'FR',
+            userAgent: c.req.header('user-agent')
+        });
+        
+        return c.json({ success: true, message: 'IP address banned successfully' });
+    } catch (e) {
+        console.error('Ban IP error:', e);
+        return c.json({ error: 'Failed to ban IP address' }, 500);
     }
 });
 
