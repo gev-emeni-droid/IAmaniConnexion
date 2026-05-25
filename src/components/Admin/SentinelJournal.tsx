@@ -38,6 +38,8 @@ interface Log {
     actor_name: string;
     actor_email: string;
     client_name: string | null;
+    payload_json?: string | null;
+    country?: string | null;
 }
 
 const ACTION_TRANSLATIONS: Record<string, string> = {
@@ -92,6 +94,20 @@ export const SentinelJournal = () => {
     const [selectedClientId, setSelectedClientId] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
     const [autoRefresh, setAutoRefresh] = useState(true);
+    const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
+
+    const handleBanIp = async (ip: string, e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (ip === 'unknown' || ip === '0.0.0.0') return;
+        if (!window.confirm(`Êtes-vous sûr de vouloir bloquer définitivement l'adresse IP ${ip} ?\nToutes les requêtes de cette IP seront rejetées.`)) return;
+        try {
+            await adminApi.banIp(ip, 'Bloqué depuis le Sentinel Journal');
+            alert(`L'IP ${ip} a été bannie avec succès.`);
+        } catch (error: any) {
+            alert('Erreur lors du blocage de l\'IP: ' + error.message);
+        }
+    };
+
 
     useEffect(() => {
         loadClients();
@@ -298,12 +314,13 @@ export const SentinelJournal = () => {
                                     </td>
                                 </tr>
                             ) : filteredLogs.map((log) => (
+                                <React.Fragment key={log.id}>
                                 <motion.tr
                                     layout
                                     initial={{ opacity: 0 }}
                                     animate={{ opacity: 1 }}
-                                    key={log.id}
-                                    className="hover:bg-[var(--bg-soft)]/30 transition-colors group"
+                                    onClick={() => setExpandedLogId(expandedLogId === log.id ? null : log.id)}
+                                    className="hover:bg-[var(--bg-soft)]/30 transition-colors group cursor-pointer"
                                 >
                                     <td className="px-6 py-4 whitespace-nowrap">
                                         <div className="flex items-center gap-3">
@@ -350,11 +367,43 @@ export const SentinelJournal = () => {
                                         </div>
                                     </td>
                                     <td className="px-6 py-4 text-right">
-                                        <div className="text-[10px] font-mono text-[var(--text-muted)] group-hover:text-[var(--text-primary)] transition-colors">
-                                            {log.ip_address === 'unknown' || log.ip_address === '0.0.0.0' ? 'Non renseignée' : log.ip_address}
+                                        <div className="flex flex-col items-end gap-1">
+                                            <div className="flex items-center gap-2">
+                                                <div className="text-[10px] font-mono text-[var(--text-muted)] group-hover:text-[var(--text-primary)] transition-colors">
+                                                    {log.ip_address === 'unknown' || log.ip_address === '0.0.0.0' ? 'Non renseignée' : log.ip_address}
+                                                </div>
+                                                {log.ip_address && log.ip_address !== 'unknown' && log.ip_address !== '0.0.0.0' && (
+                                                    <button 
+                                                        onClick={(e) => handleBanIp(log.ip_address, e)}
+                                                        className="text-red-500 hover:bg-red-500/10 p-1 rounded transition-colors"
+                                                        title="Bannir cette IP"
+                                                    >
+                                                        <ShieldAlert size={14} />
+                                                    </button>
+                                                )}
+                                            </div>
+                                            <div className="text-[9px] text-[var(--text-muted)] truncate max-w-[150px]" title={log.user_agent || ''}>
+                                                {log.country ? `Pays: ${log.country} | ` : ''} 
+                                                {log.user_agent || 'Client Inconnu'}
+                                            </div>
                                         </div>
                                     </td>
                                 </motion.tr>
+                                {expandedLogId === log.id && (
+                                    <tr className="bg-[var(--bg-soft)]/20 border-b border-[var(--border-color)]">
+                                        <td colSpan={6} className="px-6 py-4">
+                                            <div className="text-xs text-[var(--text-muted)] mb-2 font-bold uppercase tracking-wider">Payload / Détails (JSON)</div>
+                                            <pre className="text-[10px] font-mono bg-[var(--bg-app)] text-[var(--text-primary)] p-4 rounded-xl overflow-x-auto border border-[var(--border-color)]">
+                                                {log.payload_json ? (
+                                                    JSON.stringify(JSON.parse(log.payload_json), null, 2)
+                                                ) : (
+                                                    log.new_value || 'Aucun détail JSON disponible pour cette action.'
+                                                )}
+                                            </pre>
+                                        </td>
+                                    </tr>
+                                )}
+                                </React.Fragment>
                             ))}
                         </tbody>
                     </table>

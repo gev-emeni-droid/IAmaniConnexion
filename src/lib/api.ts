@@ -48,7 +48,8 @@ export const adminApi = {
     getClientDiagnostics: (clientId: string) => apiFetch(`/admin/clients/${clientId}/diagnostics`),
     sanitizeClientAccount: (clientId: string) => apiFetch(`/admin/clients/${clientId}/sanitize`, { method: 'POST' }),
     clearClientLogo: (clientId: string) => apiFetch(`/admin/clients/${clientId}/clear-logo`, { method: 'POST' }),
-    logAction: (payload: { action: string; category?: string; severity?: string; message: string }) => apiFetch('/admin/sentinel/log-action', { method: 'POST', body: JSON.stringify(payload) }),
+    logAction: (payload: { action: string; category?: string; severity?: string; message: string; details?: any }) => apiFetch('/admin/sentinel/log-action', { method: 'POST', body: JSON.stringify(payload) }),
+    banIp: (ip: string, reason?: string) => apiFetch('/admin/sentinel/ban-ip', { method: 'POST', body: JSON.stringify({ ip, reason }) }),
 };
 const API_URL = '/api';
 

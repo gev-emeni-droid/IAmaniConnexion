@@ -11,6 +11,29 @@ const ensureFactureHistoryTable = async (db: any) => {
     )`).run();
 };
 
+const ensureBannedIpsTable = async (db: any) => {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS banned_ips (
+        id TEXT PRIMARY KEY,
+        ip_address TEXT UNIQUE NOT NULL,
+        reason TEXT,
+        banned_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        banned_by TEXT
+    )`).run();
+};
+
+const ensureSentinelColumns = async (db: any) => {
+    // Check and add columns safely if they don't exist
+    const addColumn = async (table: string, columnDef: string) => {
+        try { await db.prepare(`ALTER TABLE ${table} ADD COLUMN ${columnDef}`).run(); } catch (e) {}
+    };
+    await addColumn('audit_logs', 'payload_json TEXT');
+    await addColumn('audit_logs', 'country TEXT');
+    await addColumn('audit_logs', 'client_id TEXT');
+    await addColumn('audit_logs', 'category TEXT DEFAULT "global"');
+    await addColumn('audit_logs', 'severity TEXT DEFAULT "info"');
+    await addColumn('audit_logs', 'user_agent TEXT');
+};
+
 // ...existing code...
 
 import { Hono } from 'hono';
@@ -105,6 +128,64 @@ const getDb = (c: any) => {
 
 // Initialisation de la table d'historique au démarrage
 ensureFactureHistoryTable(localDb).catch(console.error);
+ensureBannedIpsTable(localDb).catch(console.error);
+ensureSentinelColumns(localDb).catch(console.error);
+
+app.use('/api/*', async (c, next) => {
+    const db = getDb(c);
+    const ip = c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || c.req.header('x-real-ip') || 'unknown';
+    const isBanned = await db.prepare('SELECT 1 FROM banned_ips WHERE ip_address = ?').get(ip);
+    if (isBanned) {
+        return c.json({ error: 'Accès interdit : Votre adresse IP a été bloquée.' }, 403);
+    }
+    await next();
+});
+
+app.use('/api/*', async (c, next) => {
+    const path = c.req.path;
+    const method = c.req.method;
+    
+    // Ignore GET requests, CORS OPTIONS, and the log-action routes to prevent infinite loop
+    if (method === 'GET' || method === 'OPTIONS' || path.includes('/api/admin/sentinel/log-action') || path.includes('/api/admin/sentinel/ban-ip')) {
+        return await next();
+    }
+    
+    // Clone request to read body without consuming the stream for next()
+    const reqClone = c.req.raw.clone();
+    let payload = null;
+    try {
+        const contentType = reqClone.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+            payload = await reqClone.json();
+            if (payload && payload.password) {
+                payload = { ...payload, password: '***' };
+            }
+        }
+    } catch(e) {}
+    
+    await next();
+    
+    // Only log if the request was successful
+    if (c.res.status >= 200 && c.res.status < 400 && c.get('user')) {
+        const db = getDb(c);
+        const user = c.get('user');
+        
+        try {
+            await insertAuditLog(db, {
+                userId: user.id || 'system',
+                targetUserId: null,
+                clientId: user.clientId || null,
+                action: `HTTP_${method}_${path.split('/').pop()?.toUpperCase() || 'ACTION'}`,
+                category: 'METIER',
+                payloadJson: payload ? JSON.stringify(payload) : null,
+                ipAddress: c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || c.req.header('x-real-ip') || 'unknown',
+                country: c.req.header('cf-ipcountry') || 'FR',
+                userAgent: c.req.header('user-agent') || 'unknown'
+            });
+        } catch(e) { console.error('Capture Log Error:', e); }
+    }
+});
+
 const resolveClientId = (user: any, bodyClientId?: string) => {
     if (user.type === 'admin') {
         return bodyClientId || null;
@@ -532,24 +613,36 @@ const insertAuditLog = async (
     db: any,
     params: {
         userId: string;
-        targetUserId: string;
+        targetUserId?: string | null;
+        clientId?: string | null;
         action: string;
+        category?: string;
+        severity?: string;
         oldValue?: string | null;
         newValue?: string | null;
         ipAddress?: string | null;
+        payloadJson?: string | null;
+        country?: string | null;
+        userAgent?: string | null;
     }
 ) => {
     await db.prepare(`
-        INSERT INTO audit_logs (id, user_id, target_user_id, action, old_value, new_value, ip_address)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO audit_logs (id, user_id, target_user_id, client_id, action, category, severity, old_value, new_value, ip_address, payload_json, country, user_agent)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
         crypto.randomUUID().substring(0, 12),
         params.userId,
-        params.targetUserId,
+        params.targetUserId || null,
+        params.clientId || null,
         params.action,
-        params.oldValue ?? null,
-        params.newValue ?? null,
-        params.ipAddress ?? null
+        params.category || 'global',
+        params.severity || 'info',
+        params.oldValue || null,
+        params.newValue || null,
+        params.ipAddress || null,
+        params.payloadJson || null,
+        params.country || null,
+        params.userAgent || null
     );
 };
 
@@ -1317,6 +1410,44 @@ app.post('/api/admin/clients', authMiddleware, superAdminOnly, async (c) => {
     } catch (e: any) {
         console.error('Client creation error:', e);
         return c.json({ error: e.message }, 400);
+    }
+});
+
+app.post('/api/admin/sentinel/ban-ip', authMiddleware, superAdminOnly, async (c) => {
+    try {
+        const { ip, reason } = await c.req.json();
+        if (!ip) return c.json({ error: 'IP address is required' }, 400);
+        
+        const db = getDb(c);
+        const user = c.get('user');
+        
+        await db.prepare(`
+            INSERT INTO banned_ips (id, ip_address, reason, banned_by)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(ip_address) DO UPDATE SET reason = excluded.reason, banned_at = CURRENT_TIMESTAMP, banned_by = excluded.banned_by
+        `).run(
+            crypto.randomUUID(),
+            ip,
+            reason || 'Banned by admin',
+            user.id
+        );
+        
+        // Log this action
+        await insertAuditLog(db, {
+            userId: user.id,
+            action: 'BAN_IP',
+            category: 'SECURITE',
+            severity: 'alert',
+            newValue: `Banned IP: ${ip}`,
+            ipAddress: getRequestIp(c),
+            country: c.req.header('cf-ipcountry') || 'FR',
+            userAgent: c.req.header('user-agent')
+        });
+        
+        return c.json({ success: true, message: 'IP address banned successfully' });
+    } catch (e: any) {
+        console.error('Ban IP error:', e);
+        return c.json({ error: 'Failed to ban IP address' }, 500);
     }
 });
 
