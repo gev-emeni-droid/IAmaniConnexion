@@ -239,7 +239,27 @@ CREATE TABLE IF NOT EXISTS employes (
     salary REAL,
     hire_date DATE,
     tags TEXT, -- JSON array of tags/skills
+    username TEXT UNIQUE,
+    password_hash TEXT,
+    is_active INTEGER DEFAULT 0,
+    allowed_absence_types TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS absence_requests (
+    id TEXT PRIMARY KEY,
+    employe_id TEXT NOT NULL,
+    client_id TEXT NOT NULL,
+    type TEXT NOT NULL,
+    start_date DATETIME NOT NULL,
+    end_date DATETIME NOT NULL,
+    days_count REAL NOT NULL,
+    status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected')),
+    comments TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (employe_id) REFERENCES employes(id) ON DELETE CASCADE,
     FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
 );
 

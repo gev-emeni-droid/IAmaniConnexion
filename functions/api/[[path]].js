@@ -266,6 +266,23 @@ const getUserFromReq = async (c) => {
     }
 };
 
+// Middleware: Employee Security Block
+app.use('*', async (c, next) => {
+    const path = c.req.path;
+    
+    if (path.startsWith('/api/auth') || path.startsWith('/api/public')) {
+        return await next();
+    }
+    
+    const user = await getUserFromReq(c);
+    if (user && user.role === 'employee') {
+        if (!path.startsWith('/api/employe/')) {
+            return c.json({ error: 'Accès interdit. Votre compte est limité à l\'espace salarié.' }, 403);
+        }
+    }
+    await next();
+});
+
 const truncateResult = (obj) => {
     if (!obj) return obj;
     if (Array.isArray(obj)) return obj.map(truncateResult);
@@ -685,11 +702,57 @@ app.post('/auth/login', async (c) => {
             }
         }
 
+        const employee = await safeFirst(c, `
+            SELECT e.*, cl.company_name, cl.logo_url 
+            FROM employes e 
+            JOIN clients cl ON e.client_id = cl.id 
+            WHERE (LOWER(e.email) = ? OR LOWER(e.username) = ?) AND e.is_active = 1
+        `, [identifier, identifier]);
+        if (employee && body.password) {
+            let isValid = false;
+            if (employee.password_hash && employee.password_hash.startsWith('$2')) {
+                try {
+                    isValid = compareSync(body.password, employee.password_hash);
+                } catch (e) { }
+            } else if (employee.password_hash) {
+                 isValid = (body.password === employee.password_hash); // fallback for plaintext
+            }
+
+            if (isValid) {
+                const user = {
+                    id: String(employee.id),
+                    client_id: String(employee.client_id),
+                    name: String(employee.first_name + ' ' + employee.last_name),
+                    company_name: String(employee.company_name || ''),
+                    logoUrl: String(employee.logo_url || ''),
+                    type: 'employee',
+                    role: 'employee',
+                    allowed_absence_types: employee.allowed_absence_types ? JSON.parse(employee.allowed_absence_types) : []
+                };
+                await insertAuditLog(c, {
+                    action: 'LOGIN_SUCCESS',
+                    category: LOG_CATEGORIES.SECURITY,
+                    severity: LOG_SEVERITIES.SUCCESS,
+                    clientId: employee.client_id,
+                    newValue: `Connexion Employé réussie : ${user.name} (${identifier})`
+                });
+                return c.json({ token: await sign(user, getSecret(c)), user });
+            } else {
+                await insertAuditLog(c, {
+                    action: 'LOGIN_FAILED',
+                    category: LOG_CATEGORIES.SECURITY,
+                    severity: LOG_SEVERITIES.WARNING,
+                    clientId: employee.client_id,
+                    newValue: `Échec de connexion Employé (MDP incorrect) : ${identifier}`
+                });
+            }
+        }
+
         await insertAuditLog(c, {
             action: 'LOGIN_NOT_FOUND',
             category: LOG_CATEGORIES.SECURITY,
             severity: LOG_SEVERITIES.ALERT,
-            newValue: `Identifiant inconnu : ${identifier}`
+            newValue: `Identifiant inconnu ou compte inactif : ${identifier}`
         });
         return c.json({ error: 'Identifiants incorrects' }, 401);
     } catch (e) { return c.json({ error: 'Erreur Serveur' }, 500); }
@@ -984,8 +1047,251 @@ app.get('/admin/clients/:id/employes', async (c) => {
     try {
         const user = await getUserFromReq(c);
         if (!user || user.type !== 'admin') return c.json({ error: 'Accès refusé' }, 401);
-        const rows = await safeQuery(c, 'SELECT id, first_name, last_name, position, hire_date, email, phone FROM employes WHERE client_id = ? ORDER BY first_name ASC', [c.req.param('id')]);
+        const rows = await safeQuery(c, 'SELECT id, first_name, last_name, position, hire_date, email, phone, username, is_active, allowed_absence_types FROM employes WHERE client_id = ? ORDER BY first_name ASC', [c.req.param('id')]);
         return c.json(rows);
+    } catch (e) { return c.json({ error: 'Erreur' }, 500); }
+});
+
+app.post('/admin/clients/:id/employes/:eid/activate', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user || user.type !== 'admin') return c.json({ error: 'Accès refusé' }, 401);
+
+        const clientId = c.req.param('id');
+        const employeId = c.req.param('eid');
+
+        const employe = await safeFirst(c, 'SELECT * FROM employes WHERE id = ? AND client_id = ?', [employeId, clientId]);
+        if (!employe) return c.json({ error: 'Employé introuvable' }, 404);
+
+        if (!employe.email) {
+            return c.json({ error: 'Une adresse email est requise pour activer le compte' }, 400);
+        }
+
+        // Generate username
+        let baseUsername = `${employe.first_name.trim().toLowerCase()}.${employe.last_name.trim().toLowerCase()}`.replace(/[^a-z0-9.]/g, '');
+        let username = baseUsername;
+        let counter = 1;
+        while (true) {
+            const exists = await safeFirst(c, 'SELECT id FROM employes WHERE username = ?', [username]);
+            if (!exists) break;
+            username = `${baseUsername}${counter}`;
+            counter++;
+        }
+
+        // Generate password
+        const tempPassword = Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8).toUpperCase();
+        const hashed = hashSync(tempPassword, 10);
+
+        await safeQuery(c, 'UPDATE employes SET username = ?, password_hash = ?, is_active = 1 WHERE id = ?', [username, hashed, employeId]);
+
+        // Send email
+        const loginUrl = new URL(c.req.url).origin + '/login';
+        await sendEmail(c, {
+            to: employe.email,
+            subject: 'Activation de votre espace salarié IAmani',
+            html: `
+                <h2>Bonjour ${employe.first_name},</h2>
+                <p>Votre espace salarié a été activé avec succès.</p>
+                <p>Voici vos identifiants de connexion :</p>
+                <ul>
+                    <li><strong>Identifiant :</strong> ${username}</li>
+                    <li><strong>Mot de passe temporaire :</strong> ${tempPassword}</li>
+                </ul>
+                <p>Vous pouvez vous connecter ici : <a href="${loginUrl}">${loginUrl}</a></p>
+                <p>L'équipe IAmani</p>
+            `
+        });
+
+        return c.json({ success: true, username });
+    } catch (e) {
+        console.error('Activate error:', e);
+        return c.json({ error: 'Erreur lors de l\\'activation' }, 500);
+    }
+});
+
+app.post('/admin/clients/:id/employes/:eid/deactivate', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user || user.type !== 'admin') return c.json({ error: 'Accès refusé' }, 401);
+        await safeQuery(c, 'UPDATE employes SET is_active = 0 WHERE id = ? AND client_id = ?', [c.req.param('eid'), c.req.param('id')]);
+        return c.json({ success: true });
+    } catch (e) { return c.json({ error: 'Erreur' }, 500); }
+});
+
+app.post('/admin/clients/:id/employes/:eid/reset-password', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user || user.type !== 'admin') return c.json({ error: 'Accès refusé' }, 401);
+
+        const employeId = c.req.param('eid');
+        const employe = await safeFirst(c, 'SELECT * FROM employes WHERE id = ? AND client_id = ?', [employeId, c.req.param('id')]);
+        if (!employe) return c.json({ error: 'Employé introuvable' }, 404);
+
+        const tempPassword = Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8).toUpperCase();
+        const hashed = hashSync(tempPassword, 10);
+
+        await safeQuery(c, 'UPDATE employes SET password_hash = ? WHERE id = ?', [hashed, employeId]);
+
+        if (employe.email) {
+            await sendEmail(c, {
+                to: employe.email,
+                subject: 'Réinitialisation de votre mot de passe IAmani',
+                html: `
+                    <h2>Bonjour ${employe.first_name},</h2>
+                    <p>Votre mot de passe a été réinitialisé.</p>
+                    <p><strong>Nouveau mot de passe temporaire :</strong> ${tempPassword}</p>
+                    <p>L'équipe IAmani</p>
+                `
+            });
+        }
+
+        return c.json({ success: true, tempPassword: employe.email ? null : tempPassword });
+    } catch (e) { return c.json({ error: 'Erreur' }, 500); }
+});
+
+app.put('/admin/clients/:id/employes/:eid/absence-config', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user || user.type !== 'admin') return c.json({ error: 'Accès refusé' }, 401);
+        const { allowed_absence_types } = await c.req.json();
+        const jsonStr = JSON.stringify(allowed_absence_types || []);
+        await safeQuery(c, 'UPDATE employes SET allowed_absence_types = ? WHERE id = ? AND client_id = ?', [jsonStr, c.req.param('eid'), c.req.param('id')]);
+        return c.json({ success: true });
+    } catch (e) { return c.json({ error: 'Erreur' }, 500); }
+});
+
+// --- ABSENCE MANAGEMENT (MANAGER) ---
+app.get('/admin/clients/:id/absences', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user || (user.type !== 'admin' && user.type !== 'client' && user.type !== 'collaborator')) return c.json({ error: 'Accès refusé' }, 401);
+        
+        // Return absences joined with employes
+        const rows = await safeQuery(c, `
+            SELECT a.*, e.first_name, e.last_name, e.email 
+            FROM absence_requests a 
+            JOIN employes e ON a.employe_id = e.id 
+            WHERE a.client_id = ? ORDER BY a.created_at DESC
+        `, [c.req.param('id')]);
+        return c.json(rows);
+    } catch (e) { return c.json({ error: 'Erreur' }, 500); }
+});
+
+app.post('/admin/clients/:id/absences/:aid/accept', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user || (user.type !== 'admin' && user.type !== 'client' && user.type !== 'collaborator')) return c.json({ error: 'Accès refusé' }, 401);
+        
+        const absence = await safeFirst(c, 'SELECT a.*, e.email, e.first_name FROM absence_requests a JOIN employes e ON a.employe_id = e.id WHERE a.id = ? AND a.client_id = ?', [c.req.param('aid'), c.req.param('id')]);
+        if (!absence) return c.json({ error: 'Demande introuvable' }, 404);
+        
+        await safeQuery(c, "UPDATE absence_requests SET status = 'approved', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [absence.id]);
+        
+        // Inject into planning_weeks
+        const d = new Date(absence.start_date);
+        const dayOfWeek = d.getDay() === 0 ? 6 : d.getDay() - 1; 
+        const weekStart = new Date(d);
+        weekStart.setDate(d.getDate() - dayOfWeek);
+        const weekKey = weekStart.toISOString().split('T')[0];
+
+        const pw = await safeFirst(c, 'SELECT payload_json FROM planning_weeks WHERE client_id = ? AND week_start = ?', [absence.client_id, weekKey]);
+        let payload = pw ? JSON.parse(pw.payload_json) : { shifts: [] };
+        if (!payload.shifts) payload.shifts = [];
+
+        // Create shift block
+        payload.shifts.push({
+            id: 'abs_' + absence.id,
+            employeeId: absence.employe_id,
+            type: 'absence',
+            title: `Absence: ${absence.type}`,
+            startTime: absence.start_date,
+            endTime: absence.end_date,
+            isReadOnly: true,
+            color: '#ef4444' // red/warning
+        });
+
+        if (pw) {
+            await safeQuery(c, 'UPDATE planning_weeks SET payload_json = ? WHERE client_id = ? AND week_start = ?', [JSON.stringify(payload), absence.client_id, weekKey]);
+        } else {
+            await safeQuery(c, 'INSERT INTO planning_weeks (id, client_id, week_start, payload_json) VALUES (?, ?, ?, ?)', [crypto.randomUUID(), absence.client_id, weekKey, JSON.stringify(payload)]);
+        }
+
+        if (absence.email) {
+            await sendEmail(c, {
+                to: absence.email,
+                subject: 'Demande d\\'absence acceptée',
+                html: `<p>Bonjour ${absence.first_name},</p><p>Votre demande d'absence (${absence.type}) a été <strong>acceptée</strong>.</p>`
+            });
+        }
+        return c.json({ success: true });
+    } catch (e) { return c.json({ error: 'Erreur' }, 500); }
+});
+
+app.post('/admin/clients/:id/absences/:aid/reject', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user || (user.type !== 'admin' && user.type !== 'client' && user.type !== 'collaborator')) return c.json({ error: 'Accès refusé' }, 401);
+        
+        const absence = await safeFirst(c, 'SELECT a.*, e.email, e.first_name FROM absence_requests a JOIN employes e ON a.employe_id = e.id WHERE a.id = ? AND a.client_id = ?', [c.req.param('aid'), c.req.param('id')]);
+        if (!absence) return c.json({ error: 'Demande introuvable' }, 404);
+        
+        await safeQuery(c, "UPDATE absence_requests SET status = 'rejected', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [absence.id]);
+        
+        if (absence.email) {
+            await sendEmail(c, {
+                to: absence.email,
+                subject: 'Demande d\\'absence refusée',
+                html: `<p>Bonjour ${absence.first_name},</p><p>Votre demande d'absence (${absence.type}) a été <strong>refusée</strong>.</p>`
+            });
+        }
+        return c.json({ success: true });
+    } catch (e) { return c.json({ error: 'Erreur' }, 500); }
+});
+
+// --- EMPLOYEE PORTAL ---
+app.get('/employe/planning', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user || user.role !== 'employee') return c.json({ error: 'Accès refusé' }, 401);
+        
+        // Returns only weeks that have shifts for this employee
+        const weeks = await safeQuery(c, 'SELECT week_start, payload_json FROM planning_weeks WHERE client_id = ?', [user.client_id]);
+        
+        const myShifts = [];
+        for (const w of weeks) {
+            const payload = JSON.parse(w.payload_json);
+            if (payload && payload.shifts) {
+                const emShifts = payload.shifts.filter(s => s.employeeId === user.id);
+                myShifts.push(...emShifts);
+            }
+        }
+        return c.json({ shifts: myShifts });
+    } catch (e) { return c.json({ error: 'Erreur' }, 500); }
+});
+
+app.get('/employe/absences', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user || user.role !== 'employee') return c.json({ error: 'Accès refusé' }, 401);
+        
+        const rows = await safeQuery(c, 'SELECT * FROM absence_requests WHERE employe_id = ? ORDER BY created_at DESC', [user.id]);
+        return c.json(rows);
+    } catch (e) { return c.json({ error: 'Erreur' }, 500); }
+});
+
+app.post('/employe/absences', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user || user.role !== 'employee') return c.json({ error: 'Accès refusé' }, 401);
+        
+        const b = await c.req.json();
+        const id = crypto.randomUUID();
+        await safeQuery(c, `
+            INSERT INTO absence_requests (id, employe_id, client_id, type, start_date, end_date, days_count, status, comments)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+        `, [id, user.id, user.client_id, b.type, b.start_date, b.end_date, b.days_count || 1, b.comments || '']);
+        
+        return c.json({ success: true, id });
     } catch (e) { return c.json({ error: 'Erreur' }, 500); }
 });
 

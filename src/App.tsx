@@ -402,6 +402,12 @@ const Layout = ({ children }: any) => {
                                 {!isCollapsed && <span className="font-medium text-[15px] min-w-0 truncate">Support client</span>}
                             </Link>
                         </>
+                    ) : user?.type === 'employee' ? (
+                        <>
+                            {!isCollapsed && <div className="mt-5 mb-1 px-3 text-[9px] font-bold text-slate-600 dark:text-gray-400 uppercase tracking-widest">Espace Salarié</div>}
+                            <SidebarItem icon={LayoutDashboard} label="Mon Planning" to="/employe/portal" active={window.location.pathname === '/employe/portal'} collapsed={isCollapsed} />
+                            <SidebarItem icon={Calendar} label="Mes Absences" to="/employe/absences" active={window.location.pathname === '/employe/absences'} collapsed={isCollapsed} />
+                        </>
                     ) : (
                         <>
                             {!isCollapsed && <div className="mt-5 mb-1 px-3 text-[9px] font-bold text-slate-600 dark:text-gray-400 uppercase tracking-widest">Mes Modules</div>}
@@ -409,7 +415,12 @@ const Layout = ({ children }: any) => {
                             {isModuleActive('evenementiel') && <SidebarItem icon={Briefcase} label="Événementiel" to="/evenementiel" active={window.location.pathname === '/evenementiel'} collapsed={isCollapsed} />}
                             {isModuleActive('crm') && <SidebarItem icon={Users} label="CRM Contacts" to="/crm" active={window.location.pathname === '/crm'} collapsed={isCollapsed} />}
                             {isModuleActive('facture') && <SidebarItem icon={FileText} label="Factures" to="/factures" active={window.location.pathname === '/factures'} collapsed={isCollapsed} />}
-                            {isModuleActive('employes') && <SidebarItem icon={Users} label="Postes & Employés" to="/employes" active={window.location.pathname === '/employes'} collapsed={isCollapsed} />}
+                            {isModuleActive('employes') && (
+                                <>
+                                    <SidebarItem icon={Users} label="Postes & Employés" to="/employes" active={window.location.pathname === '/employes'} collapsed={isCollapsed} />
+                                    <SidebarItem icon={Calendar} label="Demandes Absences" to="/absences" active={window.location.pathname === '/absences'} collapsed={isCollapsed} />
+                                </>
+                            )}
                             {isModuleActive('convertisseur') && <ExternalSidebarItem icon={FileJson} label="ConvertisseurPDF" href="https://monconvertisseur.l-iamani.com" collapsed={isCollapsed} />}
                             {!isCollapsed && <div className="mt-5 mb-1 px-3 text-[9px] font-bold text-slate-600 dark:text-gray-400 uppercase tracking-widest">Support</div>}
                             <button
@@ -750,6 +761,7 @@ const DigitalClock = () => {
 
 const DashboardView = () => {
     const { user } = useAuth();
+    if (user?.type === 'employee') return <Navigate to="/employe/portal" />;
     const [stats, setStats] = React.useState<any[]>([]);
     const [recentActivity, setRecentActivity] = React.useState<any[]>([]);
     const [loading, setLoading] = React.useState(true);
@@ -1503,6 +1515,74 @@ const AdminClientDetailView = () => {
     const [importResult, setImportResult] = React.useState<any>(null);
     const [evenementielImportResult, setEvenementielImportResult] = React.useState<any>(null);
     const isSuperAdmin = user?.type === 'admin' && user?.email === 'gev-emeni@outlook.fr';
+
+    // Employee Actions State
+    const [configAbsenceEmp, setConfigAbsenceEmp] = React.useState<any>(null);
+    const [allowedAbsences, setAllowedAbsences] = React.useState<string[]>([]);
+
+    const handleActivateEmp = async (eid: string) => {
+        if (!confirm("Voulez-vous activer le compte de cet employé ?")) return;
+        try {
+            const token = localStorage.getItem('token');
+            const res = await fetch(`http://localhost:8787/api/admin/clients/${id}/employes/${eid}/activate`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            }).then(r => r.json());
+            if (res.error) alert(res.error);
+            else { alert(`Compte activé ! Identifiant généré : ${res.username}`); handleViewEmployees(); }
+        } catch(e) { alert("Erreur d'activation."); }
+    };
+
+    const handleDeactivateEmp = async (eid: string) => {
+        if (!confirm("Voulez-vous désactiver ce compte ? Il n'aura plus accès à la plateforme.")) return;
+        try {
+            const token = localStorage.getItem('token');
+            const res = await fetch(`http://localhost:8787/api/admin/clients/${id}/employes/${eid}/deactivate`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            }).then(r => r.json());
+            if (res.error) alert(res.error);
+            else { alert("Compte désactivé."); handleViewEmployees(); }
+        } catch(e) { alert("Erreur."); }
+    };
+
+    const handleResetPasswordEmp = async (eid: string) => {
+        if (!confirm("Voulez-vous réinitialiser le mot de passe de cet employé ?")) return;
+        try {
+            const token = localStorage.getItem('token');
+            const res = await fetch(`http://localhost:8787/api/admin/clients/${id}/employes/${eid}/reset-password`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            }).then(r => r.json());
+            if (res.error) alert(res.error);
+            else { alert(res.tempPassword ? `Mot de passe généré : ${res.tempPassword}` : "Mot de passe réinitialisé, un email a été envoyé."); }
+        } catch(e) { alert("Erreur."); }
+    };
+
+    const handleSaveAbsenceConfig = async () => {
+        try {
+            const token = localStorage.getItem('token');
+            const res = await fetch(`http://localhost:8787/api/admin/clients/${id}/employes/${configAbsenceEmp.id}/absence-config`, {
+                method: 'PUT',
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ allowed_absence_types: allowedAbsences })
+            }).then(r => r.json());
+            if (res.error) alert(res.error);
+            else { 
+                alert("Configuration sauvegardée."); 
+                setConfigAbsenceEmp(null); 
+                handleViewEmployees(); 
+            }
+        } catch(e) { alert("Erreur."); }
+    };
+
+    React.useEffect(() => {
+        if (configAbsenceEmp) {
+            try {
+                setAllowedAbsences(configAbsenceEmp.allowed_absence_types ? JSON.parse(configAbsenceEmp.allowed_absence_types) : []);
+            } catch(e) { setAllowedAbsences([]); }
+        }
+    }, [configAbsenceEmp]);
 
     const handleImportFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0] ?? null;
@@ -3189,18 +3269,40 @@ const AdminClientDetailView = () => {
                                     {clientEmployees.map((emp: any) => (
                                         <div key={emp.id} className="bg-black border border-white/5 rounded-xl p-4 flex flex-col gap-2">
                                             <div className="flex items-center gap-3">
-                                                <div className="w-10 h-10 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center font-bold text-sm uppercase">
+                                                <div className="w-10 h-10 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center font-bold text-sm uppercase shrink-0">
                                                     {emp.first_name?.[0] || ''}{emp.last_name?.[0] || ''}
                                                 </div>
-                                                <div>
-                                                    <p className="font-bold text-white">{emp.first_name} {emp.last_name}</p>
-                                                    <p className="text-xs text-gray-500">{emp.position || 'Poste non défini'}</p>
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="font-bold text-white truncate flex items-center gap-2">
+                                                        {emp.first_name} {emp.last_name}
+                                                        {emp.is_active ? <span className="px-2 py-0.5 bg-green-500/20 text-green-400 text-[10px] rounded uppercase">Actif</span> : <span className="px-2 py-0.5 bg-red-500/20 text-red-400 text-[10px] rounded uppercase">Inactif</span>}
+                                                    </p>
+                                                    <p className="text-xs text-gray-500 truncate">{emp.position || 'Poste non défini'} {emp.username ? `• ${emp.username}` : ''}</p>
                                                 </div>
                                             </div>
                                             <div className="text-xs text-gray-400 mt-2 flex flex-col gap-1">
                                                 {emp.email && <span className="flex items-center gap-2"><Mail size={12}/> {emp.email}</span>}
                                                 {emp.phone && <span className="flex items-center gap-2"><Phone size={12}/> {emp.phone}</span>}
                                                 {emp.hire_date && <span>Embauché le : {new Date(emp.hire_date).toLocaleDateString('fr-FR')}</span>}
+                                            </div>
+                                            <div className="mt-4 flex flex-wrap gap-2 pt-3 border-t border-white/5">
+                                                {!emp.is_active ? (
+                                                    <button onClick={() => handleActivateEmp(emp.id)} className="px-3 py-1.5 bg-green-500/10 text-green-400 hover:bg-green-500/20 rounded text-xs font-medium transition-colors">
+                                                        Activer / Créer accès
+                                                    </button>
+                                                ) : (
+                                                    <>
+                                                        <button onClick={() => handleDeactivateEmp(emp.id)} className="px-3 py-1.5 bg-red-500/10 text-red-400 hover:bg-red-500/20 rounded text-xs font-medium transition-colors">
+                                                            Désactiver
+                                                        </button>
+                                                        <button onClick={() => handleResetPasswordEmp(emp.id)} className="px-3 py-1.5 bg-orange-500/10 text-orange-400 hover:bg-orange-500/20 rounded text-xs font-medium transition-colors">
+                                                            Réinit. MDP
+                                                        </button>
+                                                        <button onClick={() => setConfigAbsenceEmp(emp)} className="px-3 py-1.5 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 rounded text-xs font-medium transition-colors">
+                                                            Config. Absences
+                                                        </button>
+                                                    </>
+                                                )}
                                             </div>
                                         </div>
                                     ))}
@@ -3217,9 +3319,294 @@ const AdminClientDetailView = () => {
             )}
         </AnimatePresence>
 
+        {/* Modal Configuration Absences */}
+        <AnimatePresence>
+            {configAbsenceEmp && (
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-6">
+                    <motion.div 
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.95 }}
+                        className="bg-[#111111] rounded-2xl border border-white/10 w-full max-w-md p-6"
+                    >
+                        <h3 className="text-xl font-bold text-white mb-2">Configuration des absences</h3>
+                        <p className="text-sm text-gray-400 mb-6">Employé : {configAbsenceEmp.first_name} {configAbsenceEmp.last_name}</p>
+
+                        <div className="space-y-4 mb-8">
+                            {['Congés Payés', 'Maladie', 'Maternité', 'Paternité', 'RTT', 'Sans Solde'].map(type => (
+                                <label key={type} className="flex items-center gap-3 text-white cursor-pointer group">
+                                    <input 
+                                        type="checkbox" 
+                                        checked={allowedAbsences.includes(type)}
+                                        onChange={(e) => {
+                                            if (e.target.checked) setAllowedAbsences(prev => [...prev, type]);
+                                            else setAllowedAbsences(prev => prev.filter(t => t !== type));
+                                        }}
+                                        className="w-5 h-5 rounded border-white/20 bg-black text-blue-500 focus:ring-blue-500/50"
+                                    />
+                                    <span className="group-hover:text-blue-400 transition-colors">{type}</span>
+                                </label>
+                            ))}
+                        </div>
+
+                        <div className="flex gap-3 justify-end">
+                            <button onClick={() => setConfigAbsenceEmp(null)} className="px-4 py-2 text-white hover:bg-white/5 rounded-lg transition-colors">
+                                Annuler
+                            </button>
+                            <button onClick={handleSaveAbsenceConfig} className="px-4 py-2 bg-blue-500 text-white font-bold rounded-lg hover:bg-blue-600 transition-colors">
+                                Sauvegarder
+                            </button>
+                        </div>
+                    </motion.div>
+                </div>
+            )}
+        </AnimatePresence>
+
+
     </div>
 );
 }
+
+// --- EMPLOYEE PORTAL COMPONENTS ---
+const EmployeePortal = () => {
+    const { user } = useAuth();
+    const [shifts, setShifts] = React.useState<any[]>([]);
+    const [loading, setLoading] = React.useState(true);
+
+    React.useEffect(() => {
+        const fetchPlanning = async () => {
+            try {
+                const token = localStorage.getItem('token');
+                const res = await fetch(`http://localhost:8787/api/employe/planning`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }).then(r => r.json());
+                if (!res.error && res.shifts) {
+                    setShifts(res.shifts.sort((a: any, b: any) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()));
+                }
+            } catch(e) {} finally { setLoading(false); }
+        };
+        fetchPlanning();
+    }, []);
+
+    const upcoming = shifts.filter(s => new Date(s.endTime) > new Date());
+
+    return (
+        <div className="p-6">
+            <h1 className="text-3xl font-bold text-white mb-6 flex items-center gap-3">
+                <Calendar className="text-blue-500" size={32} />
+                Mon Planning
+            </h1>
+            <div className="bg-[#111111] rounded-2xl border border-white/10 p-6">
+                <h2 className="text-xl font-bold text-white mb-4">Shifts à venir</h2>
+                {loading ? <p className="text-gray-400">Chargement...</p> : upcoming.length === 0 ? <p className="text-gray-400">Aucun shift à venir.</p> : (
+                    <div className="space-y-3">
+                        {upcoming.map((s, i) => (
+                            <div key={i} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-xl border border-white/5 bg-black" style={{ borderLeftColor: s.color || '#3b82f6', borderLeftWidth: 4 }}>
+                                <div>
+                                    <p className="font-bold text-white text-lg">{s.title}</p>
+                                    <p className="text-sm text-gray-400">
+                                        Du {new Date(s.startTime).toLocaleString('fr-FR')} au {new Date(s.endTime).toLocaleString('fr-FR')}
+                                    </p>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
+const EmployeeAbsenceModule = () => {
+    const { user } = useAuth();
+    const [absences, setAbsences] = React.useState<any[]>([]);
+    const [loading, setLoading] = React.useState(true);
+    const [showForm, setShowForm] = React.useState(false);
+    const [form, setForm] = React.useState({ type: 'Congés Payés', start_date: '', end_date: '', comments: '' });
+
+    const fetchAbsences = async () => {
+        try {
+            const token = localStorage.getItem('token');
+            const res = await fetch(`http://localhost:8787/api/employe/absences`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            }).then(r => r.json());
+            if (!res.error) setAbsences(res);
+        } catch(e) {} finally { setLoading(false); }
+    };
+
+    React.useEffect(() => { fetchAbsences(); }, []);
+
+    const handleSubmit = async (e: any) => {
+        e.preventDefault();
+        try {
+            const token = localStorage.getItem('token');
+            const res = await fetch(`http://localhost:8787/api/employe/absences`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify(form)
+            }).then(r => r.json());
+            if (res.error) alert(res.error);
+            else { setShowForm(false); setForm({ type: 'Congés Payés', start_date: '', end_date: '', comments: '' }); fetchAbsences(); }
+        } catch(e) {}
+    };
+
+    const StatusBadge = ({ status }: { status: string }) => {
+        if (status === 'approved') return <span className="px-2 py-1 bg-green-500/20 text-green-400 text-xs rounded uppercase">Accepté</span>;
+        if (status === 'rejected') return <span className="px-2 py-1 bg-red-500/20 text-red-400 text-xs rounded uppercase">Refusé</span>;
+        return <span className="px-2 py-1 bg-orange-500/20 text-orange-400 text-xs rounded uppercase">En attente</span>;
+    };
+
+    return (
+        <div className="p-6">
+            <div className="flex items-center justify-between mb-6">
+                <h1 className="text-3xl font-bold text-white flex items-center gap-3">
+                    <Calendar className="text-blue-500" size={32} />
+                    Mes Absences
+                </h1>
+                <button onClick={() => setShowForm(true)} className="px-4 py-2 bg-blue-500 text-white font-bold rounded-lg hover:bg-blue-600 transition-colors">
+                    Nouvelle Demande
+                </button>
+            </div>
+
+            {showForm && (
+                <div className="bg-[#111111] rounded-2xl border border-white/10 p-6 mb-6">
+                    <h2 className="text-xl font-bold text-white mb-4">Formuler une demande</h2>
+                    <form onSubmit={handleSubmit} className="space-y-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm text-gray-400 mb-1">Type d'absence</label>
+                                <select required value={form.type} onChange={e => setForm({...form, type: e.target.value})} className="w-full bg-black border border-white/10 rounded-lg px-4 py-2 text-white">
+                                    <option value="Congés Payés">Congés Payés</option>
+                                    <option value="Maladie">Maladie</option>
+                                    <option value="Maternité">Maternité</option>
+                                    <option value="Paternité">Paternité</option>
+                                    <option value="RTT">RTT</option>
+                                    <option value="Sans Solde">Sans Solde</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm text-gray-400 mb-1">Date de début</label>
+                                <input type="date" required value={form.start_date} onChange={e => setForm({...form, start_date: e.target.value})} className="w-full bg-black border border-white/10 rounded-lg px-4 py-2 text-white" />
+                            </div>
+                            <div>
+                                <label className="block text-sm text-gray-400 mb-1">Date de fin</label>
+                                <input type="date" required value={form.end_date} onChange={e => setForm({...form, end_date: e.target.value})} className="w-full bg-black border border-white/10 rounded-lg px-4 py-2 text-white" />
+                            </div>
+                        </div>
+                        <div>
+                            <label className="block text-sm text-gray-400 mb-1">Commentaires</label>
+                            <textarea value={form.comments} onChange={e => setForm({...form, comments: e.target.value})} className="w-full bg-black border border-white/10 rounded-lg px-4 py-2 text-white" rows={3}></textarea>
+                        </div>
+                        <div className="flex gap-3 justify-end">
+                            <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 text-white hover:bg-white/5 rounded-lg">Annuler</button>
+                            <button type="submit" className="px-4 py-2 bg-blue-500 text-white font-bold rounded-lg hover:bg-blue-600">Soumettre</button>
+                        </div>
+                    </form>
+                </div>
+            )}
+
+            <div className="bg-[#111111] rounded-2xl border border-white/10 p-6">
+                <h2 className="text-xl font-bold text-white mb-4">Historique des demandes</h2>
+                {loading ? <p className="text-gray-400">Chargement...</p> : absences.length === 0 ? <p className="text-gray-400">Aucune demande.</p> : (
+                    <div className="space-y-3">
+                        {absences.map((a: any) => (
+                            <div key={a.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-xl border border-white/5 bg-black">
+                                <div>
+                                    <div className="flex items-center gap-3 mb-1">
+                                        <p className="font-bold text-white">{a.type}</p>
+                                        <StatusBadge status={a.status} />
+                                    </div>
+                                    <p className="text-sm text-gray-400">Du {new Date(a.start_date).toLocaleDateString('fr-FR')} au {new Date(a.end_date).toLocaleDateString('fr-FR')}</p>
+                                </div>
+                                <div className="text-right mt-2 sm:mt-0 text-xs text-gray-500">
+                                    Créée le {new Date(a.created_at).toLocaleDateString('fr-FR')}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
+const ClientAbsencesModule = () => {
+    const { user } = useAuth();
+    const [absences, setAbsences] = React.useState<any[]>([]);
+    const [loading, setLoading] = React.useState(true);
+
+    const fetchAbsences = async () => {
+        try {
+            const token = localStorage.getItem('token');
+            const res = await fetch(`http://localhost:8787/api/admin/clients/${user?.client_id || user?.id}/absences`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            }).then(r => r.json());
+            if (!res.error) setAbsences(res);
+        } catch(e) {} finally { setLoading(false); }
+    };
+
+    React.useEffect(() => {
+        if (user) fetchAbsences();
+    }, [user]);
+
+    const handleAction = async (id: string, action: 'accept' | 'reject') => {
+        try {
+            const token = localStorage.getItem('token');
+            const res = await fetch(`http://localhost:8787/api/admin/clients/${user?.client_id || user?.id}/absences/${id}/${action}`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            }).then(r => r.json());
+            if (res.error) alert(res.error);
+            else fetchAbsences();
+        } catch(e) {}
+    };
+
+    return (
+        <div className="p-6">
+            <h1 className="text-3xl font-bold text-white mb-6 flex items-center gap-3">
+                <Calendar className="text-blue-500" size={32} />
+                Demandes d'absences (Employés)
+            </h1>
+
+            <div className="bg-[#111111] rounded-2xl border border-white/10 p-6">
+                {loading ? <p className="text-gray-400">Chargement...</p> : absences.length === 0 ? <p className="text-gray-400">Aucune demande.</p> : (
+                    <div className="space-y-3">
+                        {absences.map((a: any) => (
+                            <div key={a.id} className="flex flex-col md:flex-row md:items-center justify-between p-4 rounded-xl border border-white/5 bg-black">
+                                <div>
+                                    <p className="font-bold text-white flex items-center gap-2">
+                                        {a.first_name} {a.last_name} 
+                                        <span className="px-2 py-0.5 bg-blue-500/20 text-blue-400 text-xs rounded uppercase">{a.type}</span>
+                                    </p>
+                                    <p className="text-sm text-gray-400 mt-1">Du {new Date(a.start_date).toLocaleDateString('fr-FR')} au {new Date(a.end_date).toLocaleDateString('fr-FR')}</p>
+                                    {a.comments && <p className="text-xs text-gray-500 mt-2 italic">"{a.comments}"</p>}
+                                </div>
+                                <div className="mt-4 md:mt-0 flex flex-col md:items-end gap-2">
+                                    {a.status === 'pending' ? (
+                                        <div className="flex gap-2">
+                                            <button onClick={() => handleAction(a.id, 'reject')} className="px-3 py-1.5 bg-red-500/10 text-red-400 hover:bg-red-500/20 rounded text-sm transition-colors">
+                                                Refuser
+                                            </button>
+                                            <button onClick={() => handleAction(a.id, 'accept')} className="px-3 py-1.5 bg-green-500/10 text-green-400 hover:bg-green-500/20 rounded text-sm font-bold transition-colors">
+                                                Accepter
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <span className={`px-3 py-1.5 rounded text-sm font-bold ${a.status === 'approved' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                                            {a.status === 'approved' ? 'Acceptée' : 'Refusée'}
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
 
 const App = () => (
     <Router>
@@ -3233,7 +3620,10 @@ const App = () => (
                             <Route path="/planning" element={<PlanningModule />} />
                             <Route path="/crm" element={<CRMModule />} />
                             <Route path="/factures" element={<FacturesModule />} />
+                            <Route path="/employe/portal" element={<EmployeePortal />} />
+                            <Route path="/employe/absences" element={<EmployeeAbsenceModule />} />
                             <Route path="/employes" element={<PostesEmployesModule />} />
+                            <Route path="/absences" element={<ClientAbsencesModule />} />
                             <Route path="/admin/sentinel" element={<SentinelJournal />} />
                             <Route path="/admin/clients" element={<AdminClientsView />} />
                             <Route path="/admin/clients/:id" element={<AdminClientDetailView />} />
