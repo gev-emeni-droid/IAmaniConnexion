@@ -1436,6 +1436,9 @@ const AdminClientDetailView = () => {
     const { id } = useParams();
     const navigate = useNavigate();
     const [client, setClient] = React.useState<any>(null);
+    const [showEmployeesModal, setShowEmployeesModal] = React.useState(false);
+    const [clientEmployees, setClientEmployees] = React.useState<any[]>([]);
+    const [loadingEmployees, setLoadingEmployees] = React.useState(false);
     const [modules, setModules] = React.useState<any[]>([]);
     const [collaborators, setCollaborators] = React.useState<any[]>([]);
     const [spaces, setSpaces] = React.useState<any[]>([]);
@@ -1587,6 +1590,19 @@ const AdminClientDetailView = () => {
             setEvenementielImportError(e.message);
         } finally {
             setEvenementielImportLoading(false);
+        }
+    };
+
+    const handleViewEmployees = async () => {
+        setShowEmployeesModal(true);
+        setLoadingEmployees(true);
+        try {
+            const res = await api.getClientEmployes(id!);
+            if (res && !res.error) setClientEmployees(res);
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setLoadingEmployees(false);
         }
     };
 
@@ -2130,6 +2146,14 @@ const AdminClientDetailView = () => {
                                     <span className="text-white font-semibold">{Number(client.company_employee_count || 0)}</span>
                                 </div>
                             </div>
+
+                            <button
+                                onClick={handleViewEmployees}
+                                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-[#1A1A1A] hover:bg-[#222222] text-white rounded-xl font-bold transition-all border border-white/5 mt-2"
+                            >
+                                <Users size={16} className="text-blue-400" />
+                                👤 Voir la liste des employés du client
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -3127,6 +3151,67 @@ const AdminClientDetailView = () => {
                                 )}
                             </div>
                         )}
+                    </motion.div>
+                </div>
+            )}
+        </AnimatePresence>
+
+        {/* Modal Liste des employés */}
+        <AnimatePresence>
+            {showEmployeesModal && (
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-6">
+                    <motion.div 
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.95 }}
+                        className="bg-[#111111] rounded-2xl border border-white/10 w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden"
+                    >
+                        <div className="p-6 border-b border-white/10 flex items-center justify-between">
+                            <div>
+                                <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                                    <Users size={24} className="text-blue-400" />
+                                    Employés saisis ({clientEmployees.length})
+                                </h3>
+                                <p className="text-sm text-gray-500 mt-1">Liste en lecture seule des collaborateurs de ce client.</p>
+                            </div>
+                            <button onClick={() => setShowEmployeesModal(false)} className="text-gray-500 hover:text-white transition-colors">
+                                <X size={24} />
+                            </button>
+                        </div>
+                        
+                        <div className="p-6 overflow-y-auto flex-1">
+                            {loadingEmployees ? (
+                                <div className="flex justify-center p-8"><span className="text-white">Chargement...</span></div>
+                            ) : clientEmployees.length === 0 ? (
+                                <div className="text-center p-8 text-gray-500">Aucun employé saisi.</div>
+                            ) : (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {clientEmployees.map((emp: any) => (
+                                        <div key={emp.id} className="bg-black border border-white/5 rounded-xl p-4 flex flex-col gap-2">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-10 h-10 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center font-bold text-sm uppercase">
+                                                    {emp.first_name?.[0] || ''}{emp.last_name?.[0] || ''}
+                                                </div>
+                                                <div>
+                                                    <p className="font-bold text-white">{emp.first_name} {emp.last_name}</p>
+                                                    <p className="text-xs text-gray-500">{emp.position || 'Poste non défini'}</p>
+                                                </div>
+                                            </div>
+                                            <div className="text-xs text-gray-400 mt-2 flex flex-col gap-1">
+                                                {emp.email && <span className="flex items-center gap-2"><Mail size={12}/> {emp.email}</span>}
+                                                {emp.phone && <span className="flex items-center gap-2"><Phone size={12}/> {emp.phone}</span>}
+                                                {emp.hire_date && <span>Embauché le : {new Date(emp.hire_date).toLocaleDateString('fr-FR')}</span>}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                        <div className="p-4 border-t border-white/10 bg-black/50 text-right">
+                            <button onClick={() => setShowEmployeesModal(false)} className="px-6 py-2 bg-white text-black font-bold rounded-lg hover:bg-gray-200 transition-all">
+                                Fermer
+                            </button>
+                        </div>
                     </motion.div>
                 </div>
             )}

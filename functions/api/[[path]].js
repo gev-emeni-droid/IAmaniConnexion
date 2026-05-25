@@ -971,7 +971,21 @@ app.get('/admin/clients/:id', async (c) => {
         const user = await getUserFromReq(c);
         if (!user || user.type !== 'admin') return c.json({ error: 'Accès refusé' }, 401);
         const row = await safeFirst(c, `SELECT ${clientCols} FROM clients WHERE id = ?`, [c.req.param('id')]);
-        return row ? c.json(mapClient(row)) : c.json({ error: '404' }, 404);
+        if (row) {
+            const empRes = await safeFirst(c, 'SELECT COUNT(*) as count FROM employes WHERE client_id = ?', [c.req.param('id')]);
+            row.employees_count = empRes ? empRes.count : 0;
+            return c.json(mapClient(row));
+        }
+        return c.json({ error: '404' }, 404);
+    } catch (e) { return c.json({ error: 'Erreur' }, 500); }
+});
+
+app.get('/admin/clients/:id/employes', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user || user.type !== 'admin') return c.json({ error: 'Accès refusé' }, 401);
+        const rows = await safeQuery(c, 'SELECT id, first_name, last_name, position, hire_date, email, phone FROM employes WHERE client_id = ? ORDER BY first_name ASC', [c.req.param('id')]);
+        return c.json(rows);
     } catch (e) { return c.json({ error: 'Erreur' }, 500); }
 });
 
