@@ -276,7 +276,17 @@ app.use('*', async (c, next) => {
     
     const user = await getUserFromReq(c);
     if (user && user.role === 'employee') {
-        if (!path.startsWith('/api/employe/')) {
+        // Allow essential routes for employees
+        const allowedForEmployee = [
+            '/api/employe/',
+            '/api/me/modules',
+            '/api/me',
+            '/api/user/profile',
+            '/api/change-password',
+            '/api/auth/force-change-password',
+        ];
+        const isAllowed = allowedForEmployee.some(allowed => path.startsWith(allowed));
+        if (!isAllowed) {
             return c.json({ error: 'Accès interdit. Votre compte est limité à l\'espace salarié.' }, 403);
         }
     }
@@ -934,6 +944,15 @@ app.get('/me/modules', async (c) => {
         
         if (user.type === 'admin') return c.json(adminModules);
 
+        // Employee: return modules based on their allowed_absence_types (limited portal)
+        if (user.role === 'employee') {
+            // Employees have a fixed module set: just planning and absences
+            return c.json([
+                { module_name: 'planning', is_active: 1 },
+                { module_name: 'absences', is_active: 1 },
+            ]);
+        }
+
         // Robust clientId resolution (handle underscore or camelCase from JWT)
         const ownerId = user.type === 'collaborator' ? (user.client_id || user.clientId) : user.id;
         
@@ -951,15 +970,10 @@ app.get('/me/modules', async (c) => {
                 ? JSON.parse(collabData.modules_access || '[]') 
                 : (collabData?.modules_access || []);
             
-            // Logic: if establishment has NO modules defined in client_modules table, 
-            // we assume all modules are available (backward compatibility) OR we filter strictly.
-            // Let's be helpful: if the list is empty, we don't block everything if it's an old setup.
             const filtered = permissions.filter((m) => {
-                // If the establishment has explicitly configured modules, we check against them
                 if (activeInEstablishment.length > 0) {
                     return activeInEstablishment.includes(m);
                 }
-                // Otherwise (old establishment without client_modules setup), we allow what's in permissions
                 return true;
             });
 
@@ -1105,7 +1119,7 @@ app.post('/admin/clients/:id/employes/:eid/activate', async (c) => {
         return c.json({ success: true, username });
     } catch (e) {
         console.error('Activate error:', e);
-        return c.json({ error: 'Erreur lors de l\\'activation' }, 500);
+        return c.json({ error: "Erreur lors de l'activation" }, 500);
     }
 });
 
@@ -1219,7 +1233,7 @@ app.post('/admin/clients/:id/absences/:aid/accept', async (c) => {
         if (absence.email) {
             await sendEmail(c, {
                 to: absence.email,
-                subject: 'Demande d\\'absence acceptée',
+                subject: "Demande d'absence acceptée",
                 html: `<p>Bonjour ${absence.first_name},</p><p>Votre demande d'absence (${absence.type}) a été <strong>acceptée</strong>.</p>`
             });
         }
@@ -1240,7 +1254,7 @@ app.post('/admin/clients/:id/absences/:aid/reject', async (c) => {
         if (absence.email) {
             await sendEmail(c, {
                 to: absence.email,
-                subject: 'Demande d\\'absence refusée',
+                subject: "Demande d'absence refusée",
                 html: `<p>Bonjour ${absence.first_name},</p><p>Votre demande d'absence (${absence.type}) a été <strong>refusée</strong>.</p>`
             });
         }
@@ -1373,6 +1387,16 @@ app.get('/admin/clients/:id/modules', async (c) => {
         const rows = await safeQuery(c, 'SELECT module_name, is_active FROM client_modules WHERE client_id = ?', [c.req.param('id')]);
         return c.json(rows);
     } catch (e) { return c.json([]); }
+});
+
+app.get('/admin/clients/:id/planning-settings', async (c) => {
+    try {
+        const user = await getUserFromReq(c);
+        if (!user || user.type !== 'admin') return c.json({ error: 'Accès refusé' }, 401);
+        const clientId = c.req.param('id');
+        const settings = await safeFirst(c, 'SELECT payload_json FROM planning_settings WHERE client_id = ?', [clientId]);
+        return c.json(settings ? JSON.parse(settings.payload_json) : {});
+    } catch (e) { return c.json({ error: 'Erreur Serveur' }, 500); }
 });
 
 app.put('/admin/clients/:id/modules', async (c) => {

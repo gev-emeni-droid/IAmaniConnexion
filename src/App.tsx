@@ -216,7 +216,7 @@ const Layout = ({ children }: any) => {
     }, [user, loadModules, checkStatus]);
 
     const refreshClientUnreadCount = React.useCallback(async () => {
-        if (user && user.type !== 'admin') {
+        if (user && user.type !== 'admin' && user.role !== 'employee') {
             try {
                 const data = await supportApi.getClientUnreadCount();
                 setClientSupportUnreadCount(Number(data?.count || 0));
@@ -234,7 +234,8 @@ const Layout = ({ children }: any) => {
                 if (user.type === 'admin') {
                     const data = await supportApi.getAdminUnreadCount();
                     if (mounted) setSupportUnreadCount(Number(data?.count || 0));
-                } else {
+                } else if (user.role !== 'employee') {
+                    // Support is only for clients and collaborators, not employees
                     const data = await supportApi.getClientUnreadCount();
                     if (mounted) setClientSupportUnreadCount(Number(data?.count || 0));
                 }
@@ -1518,16 +1519,29 @@ const AdminClientDetailView = () => {
 
     // Employee Actions State
     const [configAbsenceEmp, setConfigAbsenceEmp] = React.useState<any>(null);
+    const [clientAbsenceTypes, setClientAbsenceTypes] = React.useState<any[]>([]);
     const [allowedAbsences, setAllowedAbsences] = React.useState<string[]>([]);
+
+    const handleOpenConfigAbsence = async (emp: any) => {
+        setConfigAbsenceEmp(emp);
+        setAllowedAbsences(emp.allowed_absence_types ? JSON.parse(emp.allowed_absence_types) : []);
+        try {
+            const settings = await adminApi.getClientPlanningSettings(clientId).then(r => r.json());
+            if (settings.absenceCodes) {
+                setClientAbsenceTypes(settings.absenceCodes);
+            } else {
+                setClientAbsenceTypes([]);
+            }
+        } catch (e) {
+            console.error("Failed to load client planning settings", e);
+            setClientAbsenceTypes([]);
+        }
+    };
 
     const handleActivateEmp = async (eid: string) => {
         if (!confirm("Voulez-vous activer le compte de cet employé ?")) return;
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`http://localhost:8787/api/admin/clients/${id}/employes/${eid}/activate`, {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}` }
-            }).then(r => r.json());
+            const res = await adminApi.activateClientEmploye(id!, eid);
             if (res.error) alert(res.error);
             else { alert(`Compte activé ! Identifiant généré : ${res.username}`); handleViewEmployees(); }
         } catch(e) { alert("Erreur d'activation."); }
@@ -1536,11 +1550,7 @@ const AdminClientDetailView = () => {
     const handleDeactivateEmp = async (eid: string) => {
         if (!confirm("Voulez-vous désactiver ce compte ? Il n'aura plus accès à la plateforme.")) return;
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`http://localhost:8787/api/admin/clients/${id}/employes/${eid}/deactivate`, {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}` }
-            }).then(r => r.json());
+            const res = await adminApi.deactivateClientEmploye(id!, eid);
             if (res.error) alert(res.error);
             else { alert("Compte désactivé."); handleViewEmployees(); }
         } catch(e) { alert("Erreur."); }
@@ -1549,11 +1559,7 @@ const AdminClientDetailView = () => {
     const handleResetPasswordEmp = async (eid: string) => {
         if (!confirm("Voulez-vous réinitialiser le mot de passe de cet employé ?")) return;
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`http://localhost:8787/api/admin/clients/${id}/employes/${eid}/reset-password`, {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}` }
-            }).then(r => r.json());
+            const res = await adminApi.resetClientEmployePassword(id!, eid);
             if (res.error) alert(res.error);
             else { alert(res.tempPassword ? `Mot de passe généré : ${res.tempPassword}` : "Mot de passe réinitialisé, un email a été envoyé."); }
         } catch(e) { alert("Erreur."); }
@@ -1562,7 +1568,7 @@ const AdminClientDetailView = () => {
     const handleSaveAbsenceConfig = async () => {
         try {
             const token = localStorage.getItem('token');
-            const res = await fetch(`http://localhost:8787/api/admin/clients/${id}/employes/${configAbsenceEmp.id}/absence-config`, {
+            const res = await fetch(`/api/admin/clients/${id}/employes/${configAbsenceEmp.id}/absence-config`, {
                 method: 'PUT',
                 headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
                 body: JSON.stringify({ allowed_absence_types: allowedAbsences })
@@ -1677,7 +1683,7 @@ const AdminClientDetailView = () => {
         setShowEmployeesModal(true);
         setLoadingEmployees(true);
         try {
-            const res = await api.getClientEmployes(id!);
+            const res = await adminApi.getClientEmployes(id!);
             if (res && !res.error) setClientEmployees(res);
         } catch (e) {
             console.error(e);
@@ -3288,7 +3294,7 @@ const AdminClientDetailView = () => {
                                             <div className="mt-4 flex flex-wrap gap-2 pt-3 border-t border-white/5">
                                                 {!emp.is_active ? (
                                                     <button onClick={() => handleActivateEmp(emp.id)} className="px-3 py-1.5 bg-green-500/10 text-green-400 hover:bg-green-500/20 rounded text-xs font-medium transition-colors">
-                                                        Activer / Créer accès
+                                                        Activer
                                                     </button>
                                                 ) : (
                                                     <>
@@ -3296,9 +3302,9 @@ const AdminClientDetailView = () => {
                                                             Désactiver
                                                         </button>
                                                         <button onClick={() => handleResetPasswordEmp(emp.id)} className="px-3 py-1.5 bg-orange-500/10 text-orange-400 hover:bg-orange-500/20 rounded text-xs font-medium transition-colors">
-                                                            Réinit. MDP
+                                                            Envoyer nouveau MDP par email
                                                         </button>
-                                                        <button onClick={() => setConfigAbsenceEmp(emp)} className="px-3 py-1.5 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 rounded text-xs font-medium transition-colors">
+                                                        <button onClick={() => handleOpenConfigAbsence(emp)} className="px-3 py-1.5 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 rounded text-xs font-medium transition-colors">
                                                             Config. Absences
                                                         </button>
                                                     </>
@@ -3333,20 +3339,25 @@ const AdminClientDetailView = () => {
                         <p className="text-sm text-gray-400 mb-6">Employé : {configAbsenceEmp.first_name} {configAbsenceEmp.last_name}</p>
 
                         <div className="space-y-4 mb-8">
-                            {['Congés Payés', 'Maladie', 'Maternité', 'Paternité', 'RTT', 'Sans Solde'].map(type => (
-                                <label key={type} className="flex items-center gap-3 text-white cursor-pointer group">
+                            {clientAbsenceTypes.length > 0 ? clientAbsenceTypes.map((type: any) => (
+                                <label key={type.code} className="flex items-center gap-3 text-white cursor-pointer group">
                                     <input 
                                         type="checkbox" 
-                                        checked={allowedAbsences.includes(type)}
+                                        checked={allowedAbsences.includes(type.code)}
                                         onChange={(e) => {
-                                            if (e.target.checked) setAllowedAbsences(prev => [...prev, type]);
-                                            else setAllowedAbsences(prev => prev.filter(t => t !== type));
+                                            if (e.target.checked) setAllowedAbsences(prev => [...prev, type.code]);
+                                            else setAllowedAbsences(prev => prev.filter(t => t !== type.code));
                                         }}
                                         className="w-5 h-5 rounded border-white/20 bg-black text-blue-500 focus:ring-blue-500/50"
                                     />
-                                    <span className="group-hover:text-blue-400 transition-colors">{type}</span>
+                                    <span className="group-hover:text-blue-400 transition-colors">
+                                        {type.code}
+                                        {type.color && <span className="ml-2 inline-block w-3 h-3 rounded-full" style={{backgroundColor: type.color}}></span>}
+                                    </span>
                                 </label>
-                            ))}
+                            )) : (
+                                <p className="text-sm text-gray-500">Aucun type d'absence configuré pour ce client.</p>
+                            )}
                         </div>
 
                         <div className="flex gap-3 justify-end">
@@ -3377,7 +3388,7 @@ const EmployeePortal = () => {
         const fetchPlanning = async () => {
             try {
                 const token = localStorage.getItem('token');
-                const res = await fetch(`http://localhost:8787/api/employe/planning`, {
+                const res = await fetch(`/api/employe/planning`, {
                     headers: { 'Authorization': `Bearer ${token}` }
                 }).then(r => r.json());
                 if (!res.error && res.shifts) {
@@ -3422,12 +3433,22 @@ const EmployeeAbsenceModule = () => {
     const [absences, setAbsences] = React.useState<any[]>([]);
     const [loading, setLoading] = React.useState(true);
     const [showForm, setShowForm] = React.useState(false);
-    const [form, setForm] = React.useState({ type: 'Congés Payés', start_date: '', end_date: '', comments: '' });
+    const allowedAbsences = React.useMemo(() => {
+        if (!user?.allowed_absence_types) return [];
+        try { return JSON.parse(user.allowed_absence_types); } catch { return []; }
+    }, [user]);
+    const [form, setForm] = React.useState({ type: allowedAbsences.length > 0 ? allowedAbsences[0] : '', start_date: '', end_date: '', comments: '' });
+
+    React.useEffect(() => {
+        if (showForm && !form.type && allowedAbsences.length > 0) {
+            setForm(f => ({ ...f, type: allowedAbsences[0] }));
+        }
+    }, [showForm, allowedAbsences]);
 
     const fetchAbsences = async () => {
         try {
             const token = localStorage.getItem('token');
-            const res = await fetch(`http://localhost:8787/api/employe/absences`, {
+            const res = await fetch(`/api/employe/absences`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             }).then(r => r.json());
             if (!res.error) setAbsences(res);
@@ -3440,13 +3461,13 @@ const EmployeeAbsenceModule = () => {
         e.preventDefault();
         try {
             const token = localStorage.getItem('token');
-            const res = await fetch(`http://localhost:8787/api/employe/absences`, {
+            const res = await fetch(`/api/employe/absences`, {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
                 body: JSON.stringify(form)
             }).then(r => r.json());
             if (res.error) alert(res.error);
-            else { setShowForm(false); setForm({ type: 'Congés Payés', start_date: '', end_date: '', comments: '' }); fetchAbsences(); }
+            else { setShowForm(false); setForm({ type: allowedAbsences.length > 0 ? allowedAbsences[0] : '', start_date: '', end_date: '', comments: '' }); fetchAbsences(); }
         } catch(e) {}
     };
 
@@ -3476,12 +3497,11 @@ const EmployeeAbsenceModule = () => {
                             <div>
                                 <label className="block text-sm text-gray-400 mb-1">Type d'absence</label>
                                 <select required value={form.type} onChange={e => setForm({...form, type: e.target.value})} className="w-full bg-black border border-white/10 rounded-lg px-4 py-2 text-white">
-                                    <option value="Congés Payés">Congés Payés</option>
-                                    <option value="Maladie">Maladie</option>
-                                    <option value="Maternité">Maternité</option>
-                                    <option value="Paternité">Paternité</option>
-                                    <option value="RTT">RTT</option>
-                                    <option value="Sans Solde">Sans Solde</option>
+                                    {allowedAbsences.length > 0 ? allowedAbsences.map((type: string) => (
+                                        <option key={type} value={type}>{type}</option>
+                                    )) : (
+                                        <option value="">Aucun type d'absence autorisé</option>
+                                    )}
                                 </select>
                             </div>
                         </div>
@@ -3540,7 +3560,7 @@ const ClientAbsencesModule = () => {
     const fetchAbsences = async () => {
         try {
             const token = localStorage.getItem('token');
-            const res = await fetch(`http://localhost:8787/api/admin/clients/${user?.client_id || user?.id}/absences`, {
+            const res = await fetch(`/api/admin/clients/${user?.client_id || user?.id}/absences`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             }).then(r => r.json());
             if (!res.error) setAbsences(res);
@@ -3554,7 +3574,7 @@ const ClientAbsencesModule = () => {
     const handleAction = async (id: string, action: 'accept' | 'reject') => {
         try {
             const token = localStorage.getItem('token');
-            const res = await fetch(`http://localhost:8787/api/admin/clients/${user?.client_id || user?.id}/absences/${id}/${action}`, {
+            const res = await fetch(`/api/admin/clients/${user?.client_id || user?.id}/absences/${id}/${action}`, {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${token}` }
             }).then(r => r.json());
