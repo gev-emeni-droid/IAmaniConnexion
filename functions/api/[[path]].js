@@ -24,13 +24,110 @@ app.use('*', async (c, next) => {
     await next();
 });
 
+// Helper for audit path translations
+const getTranslationForPath = (method, path) => {
+    const cleanPath = path.replace(/^\/api/, '');
+    
+    if (cleanPath.includes('/planning/settings') || cleanPath.includes('/planning-config')) {
+        return {
+            action: 'UPDATE_SETTINGS',
+            detail: 'Mise à jour des horaires par défaut'
+        };
+    }
+    
+    if (cleanPath.includes('/planning/week')) {
+        return {
+            action: method === 'DELETE' ? 'DELETE_PLANNING' : 'UPDATE_PLANNING',
+            detail: method === 'DELETE' ? 'Suppression de semaine de planning' : 'Modification du planning'
+        };
+    }
+
+    if (cleanPath.includes('/activate') || cleanPath.includes('/welcome')) {
+        return {
+            action: 'SEND_WELCOME_EMAIL',
+            detail: "Activation d'espace salarié et envoi d'un e-mail de bienvenue"
+        };
+    }
+    if (cleanPath.includes('/reset-password') || cleanPath.includes('/force-reset-password')) {
+        return {
+            action: 'RESET_PASSWORD',
+            detail: 'Réinitialisation de mot de passe'
+        };
+    }
+
+    if (cleanPath.includes('/employes') || cleanPath.includes('/employee')) {
+        let action = 'UPDATE_EMPLOYEE';
+        let detail = 'Modification de fiche employé';
+        if (method === 'POST') {
+            action = 'CREATE_EMPLOYEE';
+            detail = 'Création de fiche employé';
+        } else if (method === 'DELETE') {
+            action = 'DELETE_EMPLOYEE';
+            detail = 'Suppression de fiche employé';
+        }
+        return { action, detail };
+    }
+
+    if (cleanPath.includes('/clients')) {
+        let action = 'UPDATE_CLIENT';
+        let detail = 'Modification de fiche client';
+        if (method === 'POST') {
+            action = 'CREATE_CLIENT';
+            detail = 'Création de fiche client';
+        } else if (method === 'DELETE') {
+            action = 'DELETE_CLIENT';
+            detail = 'Suppression de client';
+        }
+        return { action, detail };
+    }
+
+    if (cleanPath.includes('/evenements') || cleanPath.includes('/evenementiel')) {
+        let action = 'UPDATE_EVENT';
+        let detail = 'Modification de privatisation';
+        if (method === 'POST') {
+            action = 'CREATE_EVENT';
+            detail = 'Création de privatisation';
+        } else if (method === 'DELETE') {
+            action = 'DELETE_EVENT';
+            detail = 'Suppression de privatisation';
+        }
+        return { action, detail };
+    }
+
+    if (cleanPath.includes('/factures') || cleanPath.includes('/facture')) {
+        let action = 'UPDATE_INVOICE';
+        let detail = 'Modification de facture';
+        if (method === 'POST') {
+            action = 'CREATE_INVOICE';
+            detail = 'Génération de facture';
+        } else if (method === 'DELETE') {
+            action = 'DELETE_INVOICE';
+            detail = 'Suppression de facture';
+        }
+        return { action, detail };
+    }
+    
+    if (cleanPath.includes('/auth/login')) {
+        return {
+            action: 'LOGIN_SUCCESS',
+            detail: 'Connexion réussie'
+        };
+    }
+
+    const lastSeg = cleanPath.split('/').pop()?.toUpperCase() || 'ACTION';
+    return {
+        action: `HTTP_${method}_${lastSeg}`,
+        detail: `Action système sur ${method} ${path}`
+    };
+};
+
 // Middleware: Capture Logs
 app.use('*', async (c, next) => {
     const path = c.req.path;
     const method = c.req.method;
     
     // Ignore GET requests, CORS OPTIONS, and the log-action routes to prevent infinite loop
-    if (method === 'GET' || method === 'OPTIONS' || path.includes('/api/admin/sentinel/log-action') || path.includes('/api/admin/sentinel/ban-ip')) {
+    if (method === 'GET' || method === 'OPTIONS' || path.includes('log-action') || path.includes('ban-ip') || path.includes('/api/admin/sentinel/log-action') || path.includes('/api/admin/sentinel/ban-ip')) {
         return await next();
     }
     
@@ -52,13 +149,15 @@ app.use('*', async (c, next) => {
     // Log if successful and user is available
     if (c.res.status >= 200 && c.res.status < 400 && c.get('user')) {
         const user = c.get('user');
+        const { action, detail } = getTranslationForPath(method, path);
         c.executionCtx.waitUntil((async () => {
             try {
                 await insertAuditLog(c, {
                     userId: user.id || 'system',
                     targetUserId: null,
                     clientId: user.clientId || null,
-                    action: `HTTP_${method}_${path.split('/').pop()?.toUpperCase() || 'ACTION'}`,
+                    action: action,
+                    newValue: detail,
                     category: LOG_CATEGORIES.BUSINESS,
                     payloadJson: payload ? JSON.stringify(payload) : null,
                     ipAddress: c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || c.req.header('x-real-ip') || 'unknown',
