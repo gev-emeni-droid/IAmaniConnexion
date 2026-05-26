@@ -1370,6 +1370,9 @@ app.post('/admin/clients/:id/absences/:aid/accept', async (c) => {
             color: '#ef4444' // red/warning
         });
 
+        const client = await safeFirst(c, 'SELECT company_name FROM clients WHERE id = ?', [absence.client_id]);
+        const companyName = client?.company_name || 'La Direction';
+
         if (pw) {
             await safeQuery(c, 'UPDATE planning_weeks SET payload_json = ? WHERE client_id = ? AND week_start = ?', [JSON.stringify(payload), absence.client_id, weekKey]);
         } else {
@@ -1377,10 +1380,21 @@ app.post('/admin/clients/:id/absences/:aid/accept', async (c) => {
         }
 
         if (absence.email) {
+            const htmlContent = `
+                <p>Bonjour ${absence.first_name},</p>
+                <p>Nous vous informons que votre demande d'absence pour la période du <strong>${new Date(absence.start_date).toLocaleDateString('fr-FR')}</strong> au <strong>${new Date(absence.end_date).toLocaleDateString('fr-FR')}</strong> a été <strong>acceptée</strong>.</p>
+                <div class="info-box">
+                    • <strong>Type d'absence :</strong> ${absence.type}<br>
+                    • <strong>Statut :</strong> Acceptée
+                </div>
+                <p>Cordialement,</p>
+                <p><strong>L'équipe ${companyName}</strong></p>
+            `;
             await sendEmail(c, {
                 to: absence.email,
-                subject: "Demande d'absence acceptée",
-                html: `<p>Bonjour ${absence.first_name},</p><p>Votre demande d'absence (${absence.type}) a été <strong>acceptée</strong>.</p>`
+                subject: `Demande d'absence acceptée - ${companyName}`,
+                html: renderEmail(htmlContent, "Demande d'absence", companyName),
+                fromName: companyName
             });
         }
         return c.json({ success: true });
@@ -1397,11 +1411,25 @@ app.post('/admin/clients/:id/absences/:aid/reject', async (c) => {
         
         await safeQuery(c, "UPDATE absence_requests SET status = 'rejected', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [absence.id]);
         
+        const client = await safeFirst(c, 'SELECT company_name FROM clients WHERE id = ?', [absence.client_id]);
+        const companyName = client?.company_name || 'La Direction';
+
         if (absence.email) {
+            const htmlContent = `
+                <p>Bonjour ${absence.first_name},</p>
+                <p>Nous vous informons que votre demande d'absence pour la période du <strong>${new Date(absence.start_date).toLocaleDateString('fr-FR')}</strong> au <strong>${new Date(absence.end_date).toLocaleDateString('fr-FR')}</strong> a été <strong>refusée</strong>.</p>
+                <div class="info-box">
+                    • <strong>Type d'absence :</strong> ${absence.type}<br>
+                    • <strong>Statut :</strong> Refusée
+                </div>
+                <p>Cordialement,</p>
+                <p><strong>L'équipe ${companyName}</strong></p>
+            `;
             await sendEmail(c, {
                 to: absence.email,
-                subject: "Demande d'absence refusée",
-                html: `<p>Bonjour ${absence.first_name},</p><p>Votre demande d'absence (${absence.type}) a été <strong>refusée</strong>.</p>`
+                subject: `Demande d'absence refusée - ${companyName}`,
+                html: renderEmail(htmlContent, "Demande d'absence", companyName),
+                fromName: companyName
             });
         }
         return c.json({ success: true });
@@ -1450,6 +1478,31 @@ app.post('/employe/absences', async (c) => {
             INSERT INTO absence_requests (id, employe_id, client_id, type, start_date, end_date, days_count, status, comments)
             VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
         `, [id, user.id, user.client_id, b.type, b.start_date, b.end_date, b.days_count || 1, b.comments || '']);
+        
+        // Fetch client details
+        const client = await safeFirst(c, 'SELECT email, company_name FROM clients WHERE id = ?', [user.client_id]);
+        if (client && client.email) {
+            const htmlContent = `
+                <p>Bonjour,</p>
+                <p>Une nouvelle demande d'absence a été soumise par votre salarié <strong>${user.name}</strong>.</p>
+                <div class="info-box">
+                    <strong>Détails de la demande :</strong><br>
+                    • <strong>Type :</strong> ${b.type}<br>
+                    • <strong>Période :</strong> du ${new Date(b.start_date).toLocaleDateString('fr-FR')} au ${new Date(b.end_date).toLocaleDateString('fr-FR')}<br>
+                    • <strong>Nombre de jours :</strong> ${b.days_count || 1}<br>
+                    • <strong>Commentaires :</strong> ${b.comments || 'Aucun'}
+                </div>
+                <p>Vous pouvez traiter cette demande directement sur votre portail d'administration dans le module Absences.</p>
+                <p>Cordialement,</p>
+                <p><strong>L'équipe l'IAmani</strong></p>
+            `;
+            await sendEmail(c, {
+                to: client.email,
+                subject: `Nouvelle demande d'absence - ${user.name}`,
+                html: renderEmail(htmlContent, "Demande d'absence", "L'équipe l'IAmani"),
+                fromName: "L'équipe l'IAmani"
+            });
+        }
         
         return c.json({ success: true, id });
     } catch (e) { return c.json({ error: 'Erreur' }, 500); }

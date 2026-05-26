@@ -1526,7 +1526,7 @@ const AdminClientDetailView = () => {
         setConfigAbsenceEmp(emp);
         setAllowedAbsences(emp.allowed_absence_types ? JSON.parse(emp.allowed_absence_types) : []);
         try {
-            const settings = await adminApi.getClientPlanningSettings(clientId).then(r => r.json());
+            const settings = await adminApi.getClientPlanningSettings(id!).then(r => r.json());
             if (settings.absenceCodes) {
                 setClientAbsenceTypes(settings.absenceCodes);
             } else {
