@@ -71,7 +71,49 @@ const ACTION_TRANSLATIONS: Record<string, string> = {
     'UPDATE_CLIENT': 'Modification de fiche client',
     'DELETE_CLIENT': 'Suppression de client',
     'RATE_LIMIT': 'Sécurité : Trop de requêtes',
-    'BOT_DETECTED': 'Sécurité : Robot détecté'
+    'BOT_DETECTED': 'Sécurité : Robot détecté',
+    'VIEW_CLIENT_CONFIG': 'Consultation de la configuration',
+    'UPDATE_SETTINGS': 'Modification des horaires par défaut',
+    'SEND_WELCOME_EMAIL': 'Envoi email bienvenue'
+};
+
+const getCountryNameAndFlag = (code: string) => {
+    const countries: Record<string, { name: string; flag: string }> = {
+        'FR': { name: 'France', flag: '🇫🇷' },
+        'US': { name: 'États-Unis', flag: '🇺🇸' },
+        'GB': { name: 'Royaume-Uni', flag: '🇬🇧' },
+        'DE': { name: 'Allemagne', flag: '🇩🇪' },
+        'ES': { name: 'Espagne', flag: '🇪🇸' },
+        'IT': { name: 'Italie', flag: '🇮🇹' },
+        'BE': { name: 'Belgique', flag: '🇧🇪' },
+        'CH': { name: 'Suisse', flag: '🇨🇭' },
+        'CA': { name: 'Canada', flag: '🇨🇦' },
+    };
+    const match = countries[code.toUpperCase()];
+    if (match) return `${match.flag} ${match.name}`;
+    return `🌍 ${code}`;
+};
+
+const parseUserAgent = (ua: string | null): string => {
+    if (!ua) return 'Client Inconnu';
+    const lower = ua.toLowerCase();
+    
+    let os = 'Machine Inconnue';
+    if (lower.includes('macintosh') || lower.includes('mac os')) os = 'MacBook';
+    else if (lower.includes('windows')) os = 'PC Windows';
+    else if (lower.includes('iphone')) os = 'iPhone';
+    else if (lower.includes('ipad')) os = 'iPad';
+    else if (lower.includes('android')) os = 'Android';
+    else if (lower.includes('linux')) os = 'Linux';
+
+    let browser = 'Navigateur Inconnu';
+    if (lower.includes('firefox')) browser = 'Firefox';
+    else if (lower.includes('opr/') || lower.includes('opera')) browser = 'Opera';
+    else if (lower.includes('edg/')) browser = 'Edge';
+    else if (lower.includes('chrome') || lower.includes('chromium')) browser = 'Chrome';
+    else if (lower.includes('safari') && !lower.includes('chrome')) browser = 'Safari';
+
+    return `${os} - ${browser}`;
 };
 
 const CATEGORIES = [
@@ -382,18 +424,18 @@ export const SentinelJournal = () => {
                                                     </button>
                                                 )}
                                             </div>
-                                            <div className="text-[9px] text-[var(--text-muted)] truncate max-w-[150px]" title={log.user_agent || ''}>
-                                                {log.country ? `Pays: ${log.country} | ` : ''} 
-                                                {log.user_agent || 'Client Inconnu'}
-                                            </div>
-                                        </div>
+                                             <div className="text-[10px] text-[var(--text-muted)] flex flex-col items-end gap-0.5" title={log.user_agent || ''}>
+                                                 <div>{log.country ? getCountryNameAndFlag(log.country) : ''}</div>
+                                                 <div>{parseUserAgent(log.user_agent)}</div>
+                                             </div>
+                                         </div>
                                     </td>
                                 </motion.tr>
                                 {expandedLogId === log.id && (
                                     <tr className="bg-[var(--bg-soft)]/20 border-b border-[var(--border-color)]">
                                         <td colSpan={6} className="px-6 py-4">
                                             <div className="text-xs text-[var(--text-muted)] mb-2 font-bold uppercase tracking-wider">Payload / Détails (JSON)</div>
-                                            <pre className="text-[10px] font-mono bg-[var(--bg-app)] text-[var(--text-primary)] p-4 rounded-xl overflow-x-auto border border-[var(--border-color)]">
+                                            <pre className="text-[10px] font-mono bg-[var(--bg-app)] text-[var(--text-primary)] p-4 rounded-xl overflow-x-auto whitespace-pre-wrap break-all border border-[var(--border-color)]">
                                                 {log.payload_json ? (
                                                     JSON.stringify(JSON.parse(log.payload_json), null, 2)
                                                 ) : (

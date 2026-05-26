@@ -363,6 +363,14 @@ const insertAuditLog = async (c, params) => {
         const ua = params.userAgent || c.req.header('user-agent') || 'Non renseigné';
         const country = params.country || c.req.header('cf-ipcountry') || 'FR';
         
+        let payloadJson = params.payloadJson || null;
+        if (!payloadJson && (c.req.method === 'POST' || c.req.method === 'PUT' || c.req.method === 'PATCH')) {
+            try {
+                const clone = c.req.raw.clone();
+                payloadJson = await clone.text();
+            } catch(e) {}
+        }
+        
         await c.env.DB.prepare(`
             INSERT INTO audit_logs (id, user_id, target_user_id, client_id, action, category, severity, old_value, new_value, ip_address, user_agent, payload_json, country, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -378,7 +386,7 @@ const insertAuditLog = async (c, params) => {
             params.newValue || `Action système sur ${c.req.method} ${c.req.path}`,
             ip,
             ua,
-            params.payloadJson || null,
+            payloadJson,
             country
         ).run();
     } catch (e) {
@@ -1051,6 +1059,15 @@ app.get('/admin/clients/:id', async (c) => {
         if (row) {
             const empRes = await safeFirst(c, 'SELECT COUNT(*) as count FROM employes WHERE client_id = ?', [c.req.param('id')]);
             row.employees_count = empRes ? empRes.count : 0;
+            
+            await insertAuditLog(c, {
+                action: 'VIEW_CLIENT_CONFIG',
+                category: LOG_CATEGORIES.BUSINESS,
+                severity: LOG_SEVERITIES.INFO,
+                clientId: row.id,
+                newValue: `Consultation de la fiche Configuration du Client ${row.company_name || row.name}`
+            });
+
             return c.json(mapClient(row));
         }
         return c.json({ error: '404' }, 404);
@@ -1114,6 +1131,14 @@ app.post('/admin/clients/:id/employes/:eid/activate', async (c) => {
                 <p>Vous pouvez vous connecter ici : <a href="${loginUrl}">${loginUrl}</a></p>
                 <p>L'équipe IAmani</p>
             `
+        });
+
+        await insertAuditLog(c, {
+            action: 'SEND_WELCOME_EMAIL',
+            category: LOG_CATEGORIES.BUSINESS,
+            severity: LOG_SEVERITIES.SUCCESS,
+            clientId: c.req.param('id'),
+            newValue: `Envoi d'un email de bienvenue à l'employé ${employe.first_name} ${employe.last_name} (ID: ${employeId})`
         });
 
         return c.json({ success: true, username });
@@ -2277,6 +2302,14 @@ app.post('/planning/settings', async (c) => {
             ON CONFLICT(client_id)
             DO UPDATE SET payload_json = EXCLUDED.payload_json, updated_at = CURRENT_TIMESTAMP
         `).bind(ownerId, JSON.stringify(merged)).run();
+
+        await insertAuditLog(c, {
+            action: 'UPDATE_SETTINGS',
+            category: LOG_CATEGORIES.BUSINESS,
+            severity: LOG_SEVERITIES.INFO,
+            clientId: ownerId,
+            newValue: `Modification des horaires par défaut du Client ${ownerId}`
+        });
 
         // Propagation immédiate des changements d'horaires par défaut
         if (merged.weeklyDefaults) {
