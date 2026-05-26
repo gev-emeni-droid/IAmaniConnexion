@@ -388,6 +388,20 @@ app.use('*', async (c, next) => {
         if (!isAllowed) {
             return c.json({ error: 'Accès interdit. Votre compte est limité à l\'espace salarié.' }, 403);
         }
+
+        const clientId = user.client_id || user.clientId;
+        if (path.startsWith('/api/employe/planning')) {
+            const moduleActive = await safeFirst(c, "SELECT is_active FROM client_modules WHERE client_id = ? AND module_name = 'planning'", [clientId]);
+            if (!moduleActive || Number(moduleActive.is_active) !== 1) {
+                return c.json({ error: 'Module Planning désactivé par l\'administrateur.' }, 403);
+            }
+        }
+        if (path.startsWith('/api/employe/absences')) {
+            const moduleActive = await safeFirst(c, "SELECT is_active FROM client_modules WHERE client_id = ? AND module_name = 'employes'", [clientId]);
+            if (!moduleActive || Number(moduleActive.is_active) !== 1) {
+                return c.json({ error: 'Module Absences désactivé par l\'administrateur.' }, 403);
+            }
+        }
     }
     await next();
 });
@@ -1053,13 +1067,19 @@ app.get('/me/modules', async (c) => {
         
         if (user.type === 'admin') return c.json(adminModules);
 
-        // Employee: return modules based on their allowed_absence_types (limited portal)
+        // Employee: return modules based on client activation status
         if (user.role === 'employee') {
-            // Employees have a fixed module set: just planning and absences
-            return c.json([
-                { module_name: 'planning', is_active: 1 },
-                { module_name: 'absences', is_active: 1 },
-            ]);
+            const establishmentModules = await safeQuery(c, 'SELECT module_name, is_active FROM client_modules WHERE client_id = ?', [user.client_id]);
+            const activeInEstablishment = establishmentModules.filter(r => Number(r.is_active) === 1).map(r => r.module_name);
+            
+            const employeeModules = [];
+            if (activeInEstablishment.includes('planning')) {
+                employeeModules.push({ module_name: 'planning', is_active: 1 });
+            }
+            if (activeInEstablishment.includes('employes')) {
+                employeeModules.push({ module_name: 'absences', is_active: 1 });
+            }
+            return c.json(employeeModules);
         }
 
         // Robust clientId resolution (handle underscore or camelCase from JWT)

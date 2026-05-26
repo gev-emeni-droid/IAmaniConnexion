@@ -406,8 +406,8 @@ const Layout = ({ children }: any) => {
                     ) : user?.type === 'employee' ? (
                         <>
                             {!isCollapsed && <div className="mt-5 mb-1 px-3 text-[9px] font-bold text-slate-600 dark:text-gray-400 uppercase tracking-widest">Espace Salarié</div>}
-                            <SidebarItem icon={LayoutDashboard} label="Mon Planning" to="/employe/portal" active={window.location.pathname === '/employe/portal'} collapsed={isCollapsed} />
-                            <SidebarItem icon={Calendar} label="Mes Absences" to="/employe/absences" active={window.location.pathname === '/employe/absences'} collapsed={isCollapsed} />
+                            {isModuleActive('planning') && <SidebarItem icon={LayoutDashboard} label="Mon Planning" to="/employe/portal" active={window.location.pathname === '/employe/portal'} collapsed={isCollapsed} />}
+                            {isModuleActive('absences') && <SidebarItem icon={Calendar} label="Mes Absences" to="/employe/absences" active={window.location.pathname === '/employe/absences'} collapsed={isCollapsed} />}
                         </>
                     ) : (
                         <>
