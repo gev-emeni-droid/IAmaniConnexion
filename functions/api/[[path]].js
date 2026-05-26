@@ -2107,7 +2107,62 @@ app.post('/planning/week', async (c) => {
         const date = body.weekStart;
         if (!date) return c.json({ error: 'Missing weekStart' }, 400);
 
+        try {
+            const settingsRow = await safeFirst(c, 'SELECT payload_json FROM planning_settings WHERE client_id = ?', [ownerId]);
+            const settings = settingsRow ? JSON.parse(settingsRow.payload_json) : {};
+            const weeklyDefaults = settings.weeklyDefaults || {};
 
+            const tplRow = await safeFirst(c, 'SELECT payload_json FROM planning_templates WHERE client_id = ?', [ownerId]);
+            const templates = tplRow ? JSON.parse(tplRow.payload_json) : [];
+            const templateMap = {};
+            templates.forEach(t => { templateMap[t.id] = t; });
+
+            if (body && Array.isArray(body.rows)) {
+                const weekStart = new Date(date);
+                body.rows.forEach(row => {
+                    const empDefaults = weeklyDefaults[String(row.employeeId)] || {};
+                    if (!row.shifts) row.shifts = {};
+
+                    for (let i = 0; i < 7; i++) {
+                        const d = new Date(weekStart);
+                        d.setDate(d.getDate() + i);
+                        const dayDate = d.toISOString().split('T')[0];
+
+                        const shift = row.shifts[dayDate];
+                        const hasHours = shift && Array.isArray(shift.segments) && shift.segments.some(seg => seg.type === 'horaire' && seg.start && seg.end);
+                        const hasManualOverride = shift && (shift.isManual || shift.hasOverride || (Array.isArray(shift.segments) && shift.segments.some(seg => seg.hasOverride || seg.isManual)));
+                        const isManualRepos = shift && shift.type === 'repos' && hasManualOverride;
+
+                        if (shift && (shift.type === 'absence' || isManualRepos || hasHours)) {
+                            continue;
+                        }
+
+                        const dayNames = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];
+                        const defaultKey = empDefaults[String(i)] || empDefaults[dayNames[i]] || 'REPOS';
+
+                        if (defaultKey !== 'REPOS' && defaultKey !== 'none') {
+                            const tpl = templateMap[defaultKey];
+                            if (tpl && Array.isArray(tpl.slots) && tpl.slots.length > 0) {
+                                row.shifts[dayDate] = {
+                                    date: dayDate,
+                                    type: 'travail',
+                                    serviceType: tpl.serviceType || 'midi+soir',
+                                    segments: tpl.slots.map(s => ({
+                                        type: 'horaire',
+                                        start: s.start,
+                                        end: s.end,
+                                        templateId: tpl.id,
+                                        color: tpl.color
+                                    }))
+                                };
+                            }
+                        }
+                    }
+                });
+            }
+        } catch (err) {
+            console.error('[POST /planning/week] Error while injecting default hours:', err);
+        }
 
         await c.env.DB.prepare(`
             INSERT INTO planning_weeks (id, client_id, week_start, payload_json)
