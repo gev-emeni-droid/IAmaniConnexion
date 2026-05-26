@@ -483,7 +483,7 @@ const insertAuditLog = async (c, params) => {
             params.category || LOG_CATEGORIES.GLOBAL,
             params.severity || 'info',
             params.oldValue || '',
-            params.newValue || `Action système sur ${c.req.method} ${c.req.path}`,
+            params.newValue || params.message || params.detail || `Action système sur ${c.req.method} ${c.req.path}`,
             ip,
             ua,
             payloadJson,
@@ -1882,7 +1882,7 @@ app.post('/admin/sentinel/log-action', async (c) => {
             clientId: user.clientId || user.id,
             action: action || 'CUSTOM_ACTION',
             category: category || 'METIER',
-            message: message || 'Action utilisateur personnalisée',
+            newValue: message || 'Action utilisateur personnalisée',
             details: details || {}
         });
         
