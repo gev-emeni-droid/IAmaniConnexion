@@ -78,21 +78,19 @@ const ACTION_TRANSLATIONS: Record<string, string> = {
     'SEND_WELCOME_EMAIL': 'Envoi email bienvenue'
 };
 
-const getCountryNameAndFlag = (code: string) => {
-    const countries: Record<string, { name: string; flag: string }> = {
-        'FR': { name: 'France', flag: '🇫🇷' },
-        'US': { name: 'États-Unis', flag: '🇺🇸' },
-        'GB': { name: 'Royaume-Uni', flag: '🇬🇧' },
-        'DE': { name: 'Allemagne', flag: '🇩🇪' },
-        'ES': { name: 'Espagne', flag: '🇪🇸' },
-        'IT': { name: 'Italie', flag: '🇮🇹' },
-        'BE': { name: 'Belgique', flag: '🇧🇪' },
-        'CH': { name: 'Suisse', flag: '🇨🇭' },
-        'CA': { name: 'Canada', flag: '🇨🇦' },
+const getCountryName = (code: string) => {
+    const countries: Record<string, string> = {
+        'FR': 'France',
+        'US': 'États-Unis',
+        'GB': 'Royaume-Uni',
+        'DE': 'Allemagne',
+        'ES': 'Espagne',
+        'IT': 'Italie',
+        'BE': 'Belgique',
+        'CH': 'Suisse',
+        'CA': 'Canada',
     };
-    const match = countries[code.toUpperCase()];
-    if (match) return `${match.flag} ${match.name}`;
-    return `🌍 ${code}`;
+    return countries[code.toUpperCase()] || code;
 };
 
 const parseUserAgent = (ua: string | null): string => {
@@ -426,9 +424,18 @@ export const SentinelJournal = () => {
                                                 )}
                                             </div>
                                              <div className="text-[10px] text-[var(--text-muted)] flex flex-col items-end gap-0.5" title={log.user_agent || ''}>
-                                                 <div>
-                                                     {log.country ? getCountryNameAndFlag(log.country) : ''}
-                                                     {log.city ? ` (${log.city})` : ''}
+                                                 <div className="flex items-center gap-1.5">
+                                                     {log.country && (
+                                                         <img 
+                                                             src={`https://flagcdn.com/16x12/${log.country.toLowerCase()}.png`} 
+                                                             alt={log.country} 
+                                                             className="w-3.5 h-2.5 object-cover rounded-sm border border-[var(--border-color)] inline-block"
+                                                         />
+                                                     )}
+                                                     <span>
+                                                         {log.country ? getCountryName(log.country) : ''}
+                                                         {log.city ? ` (${log.city})` : ''}
+                                                     </span>
                                                  </div>
                                                  <div>{parseUserAgent(log.user_agent)}</div>
                                              </div>
