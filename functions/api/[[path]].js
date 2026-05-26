@@ -361,8 +361,8 @@ const insertAuditLog = async (c, params) => {
         const userId = user?.id || 'système';
         const ip = params.ipAddress || c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || 'Non renseignée';
         const ua = params.userAgent || c.req.header('user-agent') || 'Non renseigné';
-        const country = params.country || c.req.header('cf-ipcountry') || 'FR';
-        const city = params.city || c.req.header('cf-ipcity') || '';
+        const country = params.country || c.req.raw.cf?.country || c.req.header('cf-ipcountry') || 'FR';
+        const city = params.city || c.req.raw.cf?.city || c.req.header('cf-ipcity') || '';
         
         let payloadJson = params.payloadJson || null;
         if (!payloadJson && (c.req.method === 'POST' || c.req.method === 'PUT' || c.req.method === 'PATCH')) {
