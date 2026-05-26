@@ -362,6 +362,7 @@ const insertAuditLog = async (c, params) => {
         const ip = params.ipAddress || c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || 'Non renseignée';
         const ua = params.userAgent || c.req.header('user-agent') || 'Non renseigné';
         const country = params.country || c.req.header('cf-ipcountry') || 'FR';
+        const city = params.city || c.req.header('cf-ipcity') || '';
         
         let payloadJson = params.payloadJson || null;
         if (!payloadJson && (c.req.method === 'POST' || c.req.method === 'PUT' || c.req.method === 'PATCH')) {
@@ -372,8 +373,8 @@ const insertAuditLog = async (c, params) => {
         }
         
         await c.env.DB.prepare(`
-            INSERT INTO audit_logs (id, user_id, target_user_id, client_id, action, category, severity, old_value, new_value, ip_address, user_agent, payload_json, country, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            INSERT INTO audit_logs (id, user_id, target_user_id, client_id, action, category, severity, old_value, new_value, ip_address, user_agent, payload_json, country, city, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         `).bind(
             generateId().substring(0, 12),
             userId,
@@ -387,7 +388,8 @@ const insertAuditLog = async (c, params) => {
             ip,
             ua,
             payloadJson,
-            country
+            country,
+            city
         ).run();
     } catch (e) {
         console.error('Erreur lors de la journalisation:', e.message);

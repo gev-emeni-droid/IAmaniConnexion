@@ -40,6 +40,7 @@ interface Log {
     client_name: string | null;
     payload_json?: string | null;
     country?: string | null;
+    city?: string | null;
 }
 
 const ACTION_TRANSLATIONS: Record<string, string> = {
@@ -425,7 +426,10 @@ export const SentinelJournal = () => {
                                                 )}
                                             </div>
                                              <div className="text-[10px] text-[var(--text-muted)] flex flex-col items-end gap-0.5" title={log.user_agent || ''}>
-                                                 <div>{log.country ? getCountryNameAndFlag(log.country) : ''}</div>
+                                                 <div>
+                                                     {log.country ? getCountryNameAndFlag(log.country) : ''}
+                                                     {log.city ? ` (${log.city})` : ''}
+                                                 </div>
                                                  <div>{parseUserAgent(log.user_agent)}</div>
                                              </div>
                                          </div>
