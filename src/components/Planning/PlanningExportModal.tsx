@@ -152,7 +152,14 @@ export const PlanningExportModal: React.FC<PlanningExportModalProps> = ({
                                                (service === 'soir' && (shift.serviceType === 'soir' || shift.serviceType === 'midi+soir'));
                         
                         if (matchesService) {
-                            const h = (shift.segments || []).filter((s: any) => s.type === 'horaire' && s.start && s.end);
+                            const h = (shift.segments || []).filter((s: any) => {
+                                if (s.type !== 'horaire' || !s.start || !s.end) return false;
+                                if (service === 'midi') {
+                                    return s.start < "16:00";
+                                } else {
+                                    return s.end > "18:00" || s.end < s.start || s.start >= "16:00";
+                                }
+                            });
                             if (h.length > 0) {
                                 displayTime = h.map((s: any) => `${s.start}-${s.end}`).join(' / ');
                             }
@@ -353,9 +360,9 @@ export const PlanningExportModal: React.FC<PlanningExportModalProps> = ({
                         if (shift?.segments) {
                             const serviceSegments = shift.segments.filter(s => {
                                 if (s.type === 'code') return true;
-                                if (s.type === 'horaire' && s.start) {
-                                    if (serviceName === 'MIDI') return s.start < "14:00";
-                                    return s.start >= "14:00" || (s.start < "14:00" && s.end >= "18:00");
+                                if (s.type === 'horaire' && s.start && s.end) {
+                                    if (serviceName === 'MIDI') return s.start < "16:00";
+                                    return s.end > "18:00" || s.end < s.start || s.start >= "16:00";
                                 }
                                 return false;
                             });
@@ -472,9 +479,9 @@ export const PlanningExportModal: React.FC<PlanningExportModalProps> = ({
                                             // On filtre les segments pour ce service uniquement
                                             const serviceSegments = shift?.segments?.filter((s: any) => {
                                                 if (s.type === 'code') return true;
-                                                if (s.type === 'horaire' && s.start) {
-                                                    if (serviceName === 'MIDI') return s.start < "14:00";
-                                                    return s.start >= "14:00" || (s.start < "14:00" && s.end >= "18:00");
+                                                if (s.type === 'horaire' && s.start && s.end) {
+                                                    if (serviceName === 'MIDI') return s.start < "16:00";
+                                                    return s.end > "18:00" || s.end < s.start || s.start >= "16:00";
                                                 }
                                                 return false;
                                             }) || [];
