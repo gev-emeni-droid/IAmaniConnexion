@@ -86,26 +86,28 @@ export const FacturesModule = () => {
                                     <div className="font-bold text-sm">{previewInvoice.customer_name}</div>
                                 </div>
 
-                                <table className="w-full mb-8">
-                                    <thead>
-                                        <tr className="border-b border-slate-200 dark:border-white/10 text-[10px] uppercase font-bold text-slate-400">
-                                            <th className="py-2 text-left">Description</th>
-                                            <th className="py-2 text-center w-20">Qté</th>
-                                            <th className="py-2 text-right w-32">Total TTC</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-100 dark:divide-white/5">
-                                        {(previewInvoice.payload_json?.lines || []).map((line: any, i: number) => (
-                                            <tr key={i} className="text-xs">
-                                                <td className="py-3 font-medium">{line.label}</td>
-                                                <td className="py-3 text-center">{line.quantity}</td>
-                                                <td className="py-3 text-right font-bold">
-                                                    {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(Object.values(line.ttcByRate || {}).reduce((a: any, b: any) => Number(a) + Number(b), 0))}
-                                                </td>
+                                <div className="overflow-x-auto">
+                                    <table className="w-full mb-8 min-w-[500px]">
+                                        <thead>
+                                            <tr className="border-b border-slate-200 dark:border-white/10 text-[10px] uppercase font-bold text-slate-400">
+                                                <th className="py-2 text-left">Description</th>
+                                                <th className="py-2 text-center w-20">Qté</th>
+                                                <th className="py-2 text-right w-32">Total TTC</th>
                                             </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100 dark:divide-white/5">
+                                            {(previewInvoice.payload_json?.lines || []).map((line: any, i: number) => (
+                                                <tr key={i} className="text-xs">
+                                                    <td className="py-3 font-medium min-w-[200px]">{line.label}</td>
+                                                    <td className="py-3 text-center">{line.quantity}</td>
+                                                    <td className="py-3 text-right font-bold">
+                                                        {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(Object.values(line.ttcByRate || {}).reduce((a: any, b: any) => Number(a) + Number(b), 0))}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
 
                                 <div className="flex justify-end">
                                     <div className="w-64 space-y-2">

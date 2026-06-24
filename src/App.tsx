@@ -174,6 +174,7 @@ const Layout = ({ children }: any) => {
             return false;
         }
     });
+    const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false);
     const [supportUnreadCount, setSupportUnreadCount] = React.useState(0);
     const [showSupportModal, setShowSupportModal] = React.useState(false);
     const [clientSupportUnreadCount, setClientSupportUnreadCount] = React.useState(0);
@@ -331,11 +332,20 @@ const Layout = ({ children }: any) => {
     return (
         <div className="flex min-h-screen bg-[var(--bg-app)] text-[var(--text-primary)] transition-colors duration-300">
             {user && user.type !== 'admin' && <ModuleTracker />}
+            
+            {/* Overlay Mobile */}
+            {isMobileMenuOpen && (
+                <div 
+                    className="fixed inset-0 bg-black/60 z-40 md:hidden" 
+                    onClick={() => setIsMobileMenuOpen(false)}
+                />
+            )}
+
             {/* Sidebar */}
             <motion.aside
                 animate={{ width: isCollapsed ? 72 : 248 }}
                 transition={{ duration: 0.25, ease: 'easeInOut' }}
-                className="bg-[var(--bg-sidebar)] border-r border-[var(--border-color)] p-3 md:p-4 flex flex-col h-screen sticky top-0 transition-colors duration-200"
+                className={`bg-[var(--bg-sidebar)] border-r border-[var(--border-color)] p-3 md:p-4 flex flex-col h-screen fixed md:sticky top-0 z-50 transition-transform duration-300 md:translate-x-0 ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:block`}
             >
                 <div className={`flex items-center ${isCollapsed ? 'justify-center' : 'justify-between'} mb-4`}>
                     <div className={`flex items-center ${isCollapsed ? '' : 'gap-2'} px-2`}>
@@ -560,14 +570,33 @@ const Layout = ({ children }: any) => {
             </AnimatePresence>
 
             {/* Main Content */}
-            <main className="flex-1 min-w-0 p-10 overflow-auto transition-colors duration-200">
-                <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.3 }}
-                >
-                    {children}
-                </motion.div>
+            <main className="flex-1 min-w-0 flex flex-col h-screen overflow-hidden transition-colors duration-200">
+                {/* Mobile Header */}
+                <div className="md:hidden flex items-center justify-between p-4 border-b border-[var(--border-color)] bg-[var(--bg-sidebar)] z-30 flex-shrink-0">
+                    <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center overflow-hidden">
+                            {resolvedLogoUrl ? (
+                                <img src={resolvedLogoUrl} alt="Logo" className="w-full h-full object-cover" />
+                            ) : (
+                                <ShieldCheck className="text-black" size={20} />
+                            )}
+                        </div>
+                        <span className="font-bold text-xl truncate">{user?.company_name || "L'IAmani"}</span>
+                    </div>
+                    <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 -mr-2 text-[var(--text-primary)]">
+                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16"/></svg>
+                    </button>
+                </div>
+                
+                <div className="flex-1 overflow-auto p-4 md:p-10">
+                    <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.3 }}
+                    >
+                        {children}
+                    </motion.div>
+                </div>
                 {user?.type !== 'admin' && (
                     <SupportModal 
                         open={showSupportModal} 

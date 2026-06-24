@@ -78,9 +78,8 @@ export const InvoiceHistory = ({ refreshKey = 0, onBack, onOpenInvoice }: Invoic
                 </div>
             </div>
 
-            <div className="bg-[var(--bg-card)] border border-[var(--border-color)] rounded-2xl overflow-hidden">
-                <div className="overflow-x-auto">
-                    <table className="w-full text-left min-w-[760px]">
+            <div className="bg-[var(--bg-card)] border border-[var(--border-color)] rounded-2xl overflow-x-auto shadow-sm">
+                <table className="w-full text-left min-w-[760px]">
                         <thead>
                             <tr className="border-b border-[var(--border-color)] bg-[var(--bg-soft)]">
                                 <th className="px-4 py-3 text-[10px] uppercase tracking-widest font-bold text-[var(--text-muted)]">N° Facture</th>

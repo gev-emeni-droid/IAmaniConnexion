@@ -214,7 +214,7 @@ const AddShiftModal: React.FC<AddShiftModalProps> = ({ isOpen, onClose, onAdd, e
                                 <WeekCalendar selected={selectedDate} onSelect={setSelectedDate} dates={weekDates} />
                             </div>
 
-                            <div className="flex gap-4">
+                            <div className="flex flex-col md:flex-row gap-4">
                                 <div className="flex-1">
                                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1.5 block ml-2">Heure de début</label>
                                     <input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} className="w-full h-10 border-2 border-slate-100 dark:border-white/5 bg-white dark:bg-slate-900 rounded-xl px-4 text-sm font-bold text-slate-700 dark:text-white outline-none focus:border-[#4AA3A2] focus:ring-2 focus:ring-[#4AA3A2]/5 transition-all" />
@@ -272,7 +272,7 @@ const AddShiftModal: React.FC<AddShiftModalProps> = ({ isOpen, onClose, onAdd, e
                                 </div>
                             </div>
 
-                            <div className="flex gap-4">
+                            <div className="flex flex-col md:flex-row gap-4">
                                 <div className="flex-1 text-center">
                                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 block">Début d'absence</label>
                                     <FullCalendar value={absenceStartDate} onChange={setAbsenceStartDate} />

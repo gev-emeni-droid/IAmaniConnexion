@@ -272,8 +272,8 @@ export const PostesEmployesModule = () => {
                 <section className="space-y-6">
                     {/* Le formulaire est maintenant dans une modale pour plus de clarté */}
 
-                    <div className="bg-white dark:bg-[#0A0A0A] border border-gray-200 dark:border-white/10 rounded-2xl overflow-hidden transition-colors duration-200">
-                        <table className="w-full text-left">
+                    <div className="bg-white dark:bg-[#0A0A0A] border border-gray-200 dark:border-white/10 rounded-2xl overflow-x-auto transition-colors duration-200">
+                        <table className="w-full text-left min-w-[500px]">
                             <thead className="bg-slate-100 dark:bg-black/60 border-b border-gray-200 dark:border-white/10">
                                 <tr>
                                     <th className="px-6 py-4 text-xs uppercase tracking-widest text-slate-700 dark:text-gray-500">Poste</th>
@@ -321,8 +321,8 @@ export const PostesEmployesModule = () => {
                         </button>
                     </div>
 
-                    <div className="bg-white dark:bg-[#0A0A0A] border border-gray-200 dark:border-white/10 rounded-2xl overflow-hidden transition-colors duration-200">
-                        <table className="w-full text-left">
+                    <div className="bg-white dark:bg-[#0A0A0A] border border-gray-200 dark:border-white/10 rounded-2xl overflow-x-auto transition-colors duration-200">
+                        <table className="w-full text-left min-w-[800px]">
                             <thead className="bg-slate-100 dark:bg-black/60 border-b border-gray-200 dark:border-white/10">
                                 <tr>
                                     <th className="px-6 py-4 text-xs uppercase tracking-widest text-slate-700 dark:text-gray-500">Employé</th>
