@@ -181,6 +181,5 @@ export const InvoiceHistory = ({ refreshKey = 0, onBack, onOpenInvoice }: Invoic
                     </table>
                 </div>
             </div>
-        </div>
     );
 };
