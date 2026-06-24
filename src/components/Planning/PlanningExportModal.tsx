@@ -356,6 +356,7 @@ export const PlanningExportModal: React.FC<PlanningExportModalProps> = ({
                         const shift = row.shifts[dayDateStr];
                         let cellContent = '';
                         let aaSegment = null;
+                        let displayName = row.employeeName.replace(/\n/g, ' ');
 
                         if (shift?.segments) {
                             const serviceSegments = shift.segments.filter(s => {
@@ -366,6 +367,11 @@ export const PlanningExportModal: React.FC<PlanningExportModalProps> = ({
                                 }
                                 return false;
                             });
+
+                            const notes = serviceSegments.filter(s => s.note?.trim()).map(s => s.note!.trim());
+                            if (notes.length > 0) {
+                                displayName += ` (${notes.join(', ')})`;
+                            }
 
                             aaSegment = serviceSegments.find(s => s.label === 'AA');
                             
@@ -404,7 +410,7 @@ export const PlanningExportModal: React.FC<PlanningExportModalProps> = ({
                             }]);
                         }
 
-                        const rowData: any[] = [row.employeeName.replace(/\n/g, ' '), cellContent.replace(/\n/g, ' ')];
+                        const rowData: any[] = [displayName, cellContent.replace(/\n/g, ' ')];
                         if (includeArrival) rowData.push(aaSegment ? 'AA' : '');
                         if (includeDeparture) rowData.push('');
                         if (includeSignature) rowData.push('');
