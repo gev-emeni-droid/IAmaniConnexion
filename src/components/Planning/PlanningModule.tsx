@@ -1282,8 +1282,9 @@ export const PlanningModule = () => {
 
 function DashboardView({ user, weeks, onOpen, onDelete, onDeleteArchive, onNew, isLoading, setIsSettingsOpen, handleOpenArchive }: any) {
     const [search, setSearch] = useState('');
-    const [sortBy, setSortBy] = useState<'recent' | 'old'>('recent');
-    const [archiveYearFilter, setArchiveYearFilter] = useState<string>('');
+
+    // --- Archives grouped by Year > Month ---
+    const monday = startOfWeek(new Date(), { weekStartsOn: 1 });
 
     const filteredWeeks = useMemo(() => {
         let list = [...weeks];
@@ -1291,37 +1292,57 @@ function DashboardView({ user, weeks, onOpen, onDelete, onDeleteArchive, onNew, 
             const s = search.toLowerCase();
             list = list.filter(w => w.id.toLowerCase().includes(s) || (w.status || '').toLowerCase().includes(s) || (w.label || '').toLowerCase().includes(s));
         }
-        if (archiveYearFilter) {
-            list = list.filter(w => {
-                const date = parseISO(w.week_start || w.id);
-                return String(getYear(date)) === archiveYearFilter;
-            });
-        }
-        list.sort((a, b) => {
-            if (sortBy === 'recent') return b.week_start.localeCompare(a.week_start);
-            return a.week_start.localeCompare(b.week_start);
-        });
+        list.sort((a, b) => b.week_start.localeCompare(a.week_start));
         return list;
-    }, [weeks, search, sortBy, archiveYearFilter]);
+    }, [weeks, search]);
 
     const activeWeeks = useMemo(() => {
-        const monday = startOfWeek(new Date(), { weekStartsOn: 1 });
         return filteredWeeks.filter(w => parseISO(w.week_start) >= monday);
     }, [filteredWeeks]);
 
     const archivedWeeks = useMemo(() => {
-        const monday = startOfWeek(new Date(), { weekStartsOn: 1 });
         return filteredWeeks.filter(w => parseISO(w.week_start) < monday);
     }, [filteredWeeks]);
 
-    const years = useMemo(() => {
-        const y = new Set<string>();
-        weeks.forEach((w: any) => {
+    // Group archives: { year: { monthKey: week[] } }
+    const archivesByYearMonth = useMemo(() => {
+        const grouped: Record<string, Record<string, any[]>> = {};
+        archivedWeeks.forEach(w => {
             const date = parseISO(w.week_start);
-            if (!isNaN(date.getTime())) y.add(String(getYear(date)));
+            const year = String(getYear(date));
+            const monthKey = format(date, 'yyyy-MM');
+            if (!grouped[year]) grouped[year] = {};
+            if (!grouped[year][monthKey]) grouped[year][monthKey] = [];
+            grouped[year][monthKey].push(w);
         });
-        return Array.from(y).sort().reverse();
-    }, [weeks]);
+        return grouped;
+    }, [archivedWeeks]);
+
+    const sortedYears = useMemo(() =>
+        Object.keys(archivesByYearMonth).sort((a, b) => Number(b) - Number(a))
+    , [archivesByYearMonth]);
+
+    // Open the most recent year by default
+    const [openYears, setOpenYears] = useState<Set<string>>(() => {
+        const allYears = Object.keys(archivesByYearMonth).sort((a, b) => Number(b) - Number(a));
+        return new Set(allYears.length > 0 ? [allYears[0]] : []);
+    });
+    const [openMonths, setOpenMonths] = useState<Set<string>>(new Set());
+
+    const toggleYear = (year: string) => {
+        setOpenYears(prev => {
+            const next = new Set(prev);
+            if (next.has(year)) next.delete(year); else next.add(year);
+            return next;
+        });
+    };
+    const toggleMonth = (monthKey: string) => {
+        setOpenMonths(prev => {
+            const next = new Set(prev);
+            if (next.has(monthKey)) next.delete(monthKey); else next.add(monthKey);
+            return next;
+        });
+    };
 
     return (
         <div className="space-y-8 animate-in fade-in duration-500">
@@ -1370,24 +1391,6 @@ function DashboardView({ user, weeks, onOpen, onDelete, onDeleteArchive, onNew, 
                             onChange={(e) => setSearch(e.target.value)}
                         />
                     </div>
-                    <div className="flex items-center gap-2">
-                        <select
-                            value={archiveYearFilter}
-                            onChange={(e) => setArchiveYearFilter(e.target.value)}
-                            className="bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-white/10 rounded-xl px-4 py-2 text-sm font-bold text-slate-600 dark:text-slate-300 outline-none"
-                        >
-                            <option value="">Toutes les années</option>
-                            {years.map(y => <option key={y} value={y}>{y}</option>)}
-                        </select>
-                        <select
-                            value={sortBy}
-                            onChange={(e) => setSortBy(e.target.value as any)}
-                            className="bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-white/10 rounded-xl px-4 py-2 text-sm font-bold text-slate-600 dark:text-slate-300 outline-none"
-                        >
-                            <option value="recent">Plus récent</option>
-                            <option value="old">Plus ancien</option>
-                        </select>
-                    </div>
                 </div>
 
                 <div className="p-6">
@@ -1398,6 +1401,7 @@ function DashboardView({ user, weeks, onOpen, onDelete, onDeleteArchive, onNew, 
                         </div>
                     ) : (
                         <div className="space-y-12">
+                            {/* === PLANNINGS ACTIFS === */}
                             <section>
                                 <div className="flex items-center gap-2 mb-6 ml-2">
                                     <div className="h-4 w-1 rounded-full bg-emerald-500" />
@@ -1416,24 +1420,87 @@ function DashboardView({ user, weeks, onOpen, onDelete, onDeleteArchive, onNew, 
                                 </div>
                             </section>
 
-                            {archivedWeeks.length > 0 && (
+                            {/* === ARCHIVES : Arborescence Année > Mois === */}
+                            {sortedYears.length > 0 && (
                                 <section>
-                                    <div className="flex items-center gap-2 mb-6 ml-2">
+                                    <div className="flex items-center gap-2 mb-4 ml-2">
                                         <div className="h-4 w-1 rounded-full bg-slate-400" />
                                         <h2 className="text-lg font-black text-slate-400 tracking-tight">Archives</h2>
                                     </div>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                                        {archivedWeeks.map(w => (
-                                            <WeekCard
-                                                key={w.id}
-                                                week={w}
-                                                user={user}
-                                                onOpen={() => onOpen(w.week_start)}
-                                                onDelete={() => onDeleteArchive(w.week_start)}
-                                                isArchived
-                                                handleOpenArchive={handleOpenArchive}
-                                            />
-                                        ))}
+                                    <div className="space-y-2">
+                                        {sortedYears.map(year => {
+                                            const isYearOpen = openYears.has(year);
+                                            const monthsInYear = Object.keys(archivesByYearMonth[year]).sort((a, b) => b.localeCompare(a));
+                                            const totalWeeks = Object.values(archivesByYearMonth[year]).reduce((acc, arr) => acc + arr.length, 0);
+                                            return (
+                                                <div key={year} className="rounded-2xl border border-slate-200 dark:border-white/10 overflow-hidden">
+                                                    {/* En-tête Année */}
+                                                    <button
+                                                        onClick={() => toggleYear(year)}
+                                                        className="w-full flex items-center justify-between px-5 py-4 bg-slate-50 dark:bg-slate-900/60 hover:bg-slate-100 dark:hover:bg-slate-900 transition-colors"
+                                                    >
+                                                        <div className="flex items-center gap-3">
+                                                            {isYearOpen
+                                                                ? <ChevronDown size={18} className="text-slate-400" />
+                                                                : <ChevronRight size={18} className="text-slate-400" />
+                                                            }
+                                                            <span className="text-base font-black text-slate-700 dark:text-slate-200 tracking-tight">{year}</span>
+                                                            <span className="text-xs font-bold text-slate-400 bg-slate-200 dark:bg-slate-700 px-2 py-0.5 rounded-full">{totalWeeks} semaine{totalWeeks > 1 ? 's' : ''}</span>
+                                                        </div>
+                                                    </button>
+
+                                                    {/* Contenu de l'année : mois */}
+                                                    {isYearOpen && (
+                                                        <div className="divide-y divide-slate-100 dark:divide-white/5">
+                                                            {monthsInYear.map(monthKey => {
+                                                                const isMonthOpen = openMonths.has(monthKey);
+                                                                const monthWeeks = archivesByYearMonth[year][monthKey];
+                                                                const monthDate = parseISO(monthKey + '-01');
+                                                                const monthLabel = format(monthDate, 'MMMM yyyy', { locale: fr }).toUpperCase();
+                                                                return (
+                                                                    <div key={monthKey}>
+                                                                        {/* En-tête Mois */}
+                                                                        <button
+                                                                            onClick={() => toggleMonth(monthKey)}
+                                                                            className="w-full flex items-center justify-between px-8 py-3 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors"
+                                                                        >
+                                                                            <div className="flex items-center gap-3">
+                                                                                {isMonthOpen
+                                                                                    ? <ChevronDown size={15} className="text-slate-300" />
+                                                                                    : <ChevronRight size={15} className="text-slate-300" />
+                                                                                }
+                                                                                <CalendarIcon size={14} className="text-slate-400" />
+                                                                                <span className="text-sm font-bold text-slate-600 dark:text-slate-300">{monthLabel}</span>
+                                                                                <span className="text-xs font-bold text-slate-300 dark:text-slate-500">{monthWeeks.length} sem.</span>
+                                                                            </div>
+                                                                        </button>
+
+                                                                        {/* Cards de semaines */}
+                                                                        {isMonthOpen && (
+                                                                            <div className="px-6 pb-6 pt-3 bg-slate-50/50 dark:bg-slate-900/30">
+                                                                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                                                                                    {monthWeeks.map((w: any) => (
+                                                                                        <WeekCard
+                                                                                            key={w.id}
+                                                                                            week={w}
+                                                                                            user={user}
+                                                                                            onOpen={() => onOpen(w.week_start)}
+                                                                                            onDelete={() => onDeleteArchive(w.week_start)}
+                                                                                            isArchived
+                                                                                            handleOpenArchive={handleOpenArchive}
+                                                                                        />
+                                                                                    ))}
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
                                     </div>
                                 </section>
                             )}
