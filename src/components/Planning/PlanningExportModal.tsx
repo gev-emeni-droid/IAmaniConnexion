@@ -533,50 +533,43 @@ export const PlanningExportModal: React.FC<PlanningExportModalProps> = ({
 
                                             if (hasRedShift) {
                                                 // Appliquer le style rouge (fond rouge, texte blanc)
-                                                data.cell.styles.fillColor = [239, 68, 68]; // #ef4444
+                                                data.cell.styles.fillColor = [211, 47, 47];
                                                 data.cell.styles.textColor = [255, 255, 255];
                                                 data.cell.styles.fontStyle = 'bold';
                                                 data.cell.styles.halign = 'center';
-                                            } else if (absSeg && targetColor && targetColor.toUpperCase() !== '#FFFFFF') {
-                                                // Appliquer la couleur de l'absence UNIQUEMENT si la cellule affiche
-                                                // le code d'absence lui-même (ex: "CM", "CP") et NON un horaire (ex: "11:45-15:00").
-                                                // Si la cellule affiche un horaire, on laisse blanc même si le salarié a un code AA en plus.
+                                            } else if (absSeg) {
+                                                // Tout code d'absence (CM, CP, AA, etc.) → ROUGE/BLANC sur la feuille de présence
+                                                // peu importe la couleur configurée dans le planning.
+                                                // On applique uniquement si la cellule affiche le code lui-même (pas un horaire).
                                                 const cellIsAbsenceCode = !cellValue.includes(':') && !cellValue.includes('-');
                                                 if (cellIsAbsenceCode) {
-                                                    const styles = getDynamicStyles(targetColor);
-                                                    data.cell.styles.fillColor = styles.bg;
-                                                    data.cell.styles.textColor = styles.text;
+                                                    data.cell.styles.fillColor = [211, 47, 47]; // rouge
+                                                    data.cell.styles.textColor = [255, 255, 255]; // blanc
                                                     data.cell.styles.fontStyle = 'bold';
                                                     data.cell.styles.halign = 'center';
                                                 } else {
-                                                    // Horaire + absence code : on garde blanc
+                                                    // Horaire + code : on garde blanc
                                                     data.cell.styles.fillColor = [255, 255, 255];
                                                     data.cell.styles.textColor = [0, 0, 0];
                                                 }
                                             } else {
-                                                // Toutes les autres couleurs (vert, bleu, etc.) ignorées
+                                                // Pas d'absence, pas de rouge : fond blanc
                                                 data.cell.styles.fillColor = [255, 255, 255];
                                                 data.cell.styles.textColor = [0, 0, 0];
                                             }
                                         }
                                 }
 
-                                // 3. Colonnes Arrivée/Départ (2 et 3) : Centrage et AA en rouge
+                                // 3. Colonnes Arrivée/Départ (2 et 3) : tous les codes d'absence en ROUGE/BLANC
                                 if (data.column.index === 2 || data.column.index === 3) {
                                     data.cell.styles.halign = 'center';
-                                    const absCode = String(data.cell.raw).toUpperCase();
-                                    const absConfig = dynamicAbsences.find((a: any) => absCode === String(a.code).toUpperCase());
-                                    
-                                    if (absConfig && absConfig.color) {
-                                        const styles = getDynamicStyles(absConfig.color);
-                                        data.cell.styles.fillColor = styles.bg;
-                                        data.cell.styles.textColor = styles.text;
-                                        data.cell.styles.fontStyle = 'bold';
-                                    } else if (absCode === 'AA') {
-                                        // Fallback historique si non configuré dans les codes dynamiques
-                                        data.cell.styles.fontStyle = 'bold';
+                                    const absCode = String(data.cell.raw || '').toUpperCase().trim();
+                                    // Si la cellule contient un code (non vide, pas un tiret, pas un horaire) → rouge/blanc
+                                    const isAbsCode = absCode.length > 0 && absCode !== '-' && !absCode.includes(':');
+                                    if (isAbsCode) {
+                                        data.cell.styles.fillColor = [211, 47, 47];
                                         data.cell.styles.textColor = [255, 255, 255];
-                                        data.cell.styles.fillColor = [211, 47, 47]; // Rouge AA
+                                        data.cell.styles.fontStyle = 'bold';
                                     }
                                 }
                             }
