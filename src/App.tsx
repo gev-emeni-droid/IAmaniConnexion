@@ -629,13 +629,6 @@ const LoginView = () => {
 
     return (
         <div className="min-h-screen relative overflow-hidden bg-[#030712] flex items-center justify-center p-6">
-            <InfoModal
-                id="login_welcome_v1"
-                title="Bienvenue chez L'IAmani"
-                message="Bienvenue dans la nouvelle interface de l'IAmani. Veuillez vous connecter avec vos identifiants habituels, ou contacter le développeur du site en cas de besoin."
-                isOpen={showInfoModal}
-                onClose={() => setShowInfoModal(false)}
-            />
             <div className="absolute inset-0 pointer-events-none">
                 <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.16),transparent_0%,transparent_42%),radial-gradient(circle_at_bottom,_rgba(99,102,241,0.16),transparent_0%,transparent_48%)]" />
                 {stars.map((star) => (

@@ -370,7 +370,8 @@ export const PlanningExportModal: React.FC<PlanningExportModalProps> = ({
 
                             const notes = serviceSegments.filter(s => s.note?.trim()).map(s => s.note!.trim());
                             if (notes.length > 0) {
-                                displayName += ` (${notes.join(', ')})`;
+                                // Add a specific prefix to segment notes so the PDF drawer can distinguish them from name parentheses
+                                displayName += ` [SEG_NOTE:(${notes.join(', ')})]`;
                             }
 
                             aaSegment = serviceSegments.find(s => s.label === 'AA');
@@ -466,8 +467,19 @@ export const PlanningExportModal: React.FC<PlanningExportModalProps> = ({
                                 // 1. Noms toujours en NOIR
                                 if (data.column.index === 0) {
                                     data.cell.styles.textColor = [0, 0, 0];
+                                    const rawText = String(data.cell.raw || '');
+                                    if (rawText.includes('[SEG_NOTE:')) {
+                                        // Save the original text with marker on a custom property so didDrawCell can read it
+                                        (data.cell as any)._originalRawText = rawText;
+                                        // Set the cell text to just the name part so autoTable does not render the [SEG_NOTE:...] part or truncate it
+                                        const match = rawText.match(/^(.*?)\s*\[SEG_NOTE:\((.*?)\)\]$/);
+                                        if (match) {
+                                            data.cell.text = [match[1].trim()];
+                                            data.cell.styles.halign = 'left';
+                                        }
+                                    }
                                 }
-
+ 
                                 // 2. Colonne Horaires / Absences (Colonne 1)
                                 if (data.column.index === 1) {
                                     const cellValue = String(data.cell.raw || "").toUpperCase();
@@ -479,7 +491,14 @@ export const PlanningExportModal: React.FC<PlanningExportModalProps> = ({
                                             data.cell.styles.fontStyle = 'bold';
                                             data.cell.styles.halign = 'center';
                                         } else {
-                                            const empName = String(data.row.cells[0].raw || "").trim();
+                                            // Get raw employee name from row cells (which might contain the segment note marker)
+                                            let empName = String(data.row.cells[0].raw || "").trim();
+                                            if (empName.includes('[SEG_NOTE:')) {
+                                                const cleanMatch = empName.match(/^(.*?)\s*\[SEG_NOTE:\((.*?)\)\]$/);
+                                                if (cleanMatch) {
+                                                    empName = cleanMatch[1].trim();
+                                                }
+                                            }
                                             const empData = filteredRows.find(r => r.employeeName === empName);
                                             const shift = empData?.shifts[dayDateStr];
                                             // On filtre les segments pour ce service uniquement
@@ -498,13 +517,46 @@ export const PlanningExportModal: React.FC<PlanningExportModalProps> = ({
                                             
                                             let targetColor = absSeg?.colorOverride || absConfig?.color;
 
-                                            // On ne met de couleur QUE si c'est une absence (pas pour les horaires normaux)
-                                            if (targetColor && targetColor.toUpperCase() !== '#FFFFFF') {
-                                                const styles = getDynamicStyles(targetColor);
-                                                data.cell.styles.fillColor = styles.bg;
-                                                data.cell.styles.textColor = styles.text;
+                                            // Si ce n'est pas une absence, on regarde s'il y a un horaire ROUGE
+                                            const hasRedShift = serviceSegments.some((s: any) => {
+                                                const color = s.colorOverride || s.color || '';
+                                                // Vérifie si la couleur est rouge (ex: #ef4444, #ff0000, red, etc.)
+                                                return color && (
+                                                    color.toLowerCase() === 'red' ||
+                                                    color.toLowerCase() === '#ef4444' ||
+                                                    color.toLowerCase() === '#ff0000' ||
+                                                    color.toLowerCase() === '#f87171' ||
+                                                    color.toLowerCase() === '#dc2626' ||
+                                                    color.toLowerCase() === '#b91c1c'
+                                                );
+                                            });
+
+                                            if (hasRedShift) {
+                                                // Appliquer le style rouge (fond rouge, texte blanc)
+                                                data.cell.styles.fillColor = [239, 68, 68]; // #ef4444
+                                                data.cell.styles.textColor = [255, 255, 255];
                                                 data.cell.styles.fontStyle = 'bold';
                                                 data.cell.styles.halign = 'center';
+                                            } else if (absSeg && targetColor && targetColor.toUpperCase() !== '#FFFFFF') {
+                                                // Appliquer la couleur de l'absence UNIQUEMENT si la cellule affiche
+                                                // le code d'absence lui-même (ex: "CM", "CP") et NON un horaire (ex: "11:45-15:00").
+                                                // Si la cellule affiche un horaire, on laisse blanc même si le salarié a un code AA en plus.
+                                                const cellIsAbsenceCode = !cellValue.includes(':') && !cellValue.includes('-');
+                                                if (cellIsAbsenceCode) {
+                                                    const styles = getDynamicStyles(targetColor);
+                                                    data.cell.styles.fillColor = styles.bg;
+                                                    data.cell.styles.textColor = styles.text;
+                                                    data.cell.styles.fontStyle = 'bold';
+                                                    data.cell.styles.halign = 'center';
+                                                } else {
+                                                    // Horaire + absence code : on garde blanc
+                                                    data.cell.styles.fillColor = [255, 255, 255];
+                                                    data.cell.styles.textColor = [0, 0, 0];
+                                                }
+                                            } else {
+                                                // Toutes les autres couleurs (vert, bleu, etc.) ignorées
+                                                data.cell.styles.fillColor = [255, 255, 255];
+                                                data.cell.styles.textColor = [0, 0, 0];
                                             }
                                         }
                                 }
@@ -525,6 +577,44 @@ export const PlanningExportModal: React.FC<PlanningExportModalProps> = ({
                                         data.cell.styles.fontStyle = 'bold';
                                         data.cell.styles.textColor = [255, 255, 255];
                                         data.cell.styles.fillColor = [211, 47, 47]; // Rouge AA
+                                    }
+                                }
+                            }
+                        },
+                        // Custom drawing to render the note part in bold + italic + underline
+                        didDrawCell: function(data) {
+                            if (data.section === 'body' && data.column.index === 0) {
+                                const originalText = (data.cell as any)._originalRawText || '';
+                                if (originalText.includes('[SEG_NOTE:')) {
+                                    const match = originalText.match(/^(.*?)\s*\[SEG_NOTE:\((.*?)\)\]$/);
+                                    if (match) {
+                                        const namePart = match[1].trim();
+                                        const notePart = `(${match[2].trim()})`;
+
+                                        // autoTable already drew the name at the correct position.
+                                        // We measure the name width then place the note immediately after.
+                                        data.doc.setFont('helvetica', 'bold');
+                                        data.doc.setFontSize(fontSize);
+                                        const nameWidth = data.doc.getTextWidth(namePart);
+
+                                        // Use cell vertical center with baseline:'middle' so it aligns with the row text.
+                                        // X = cell.x + cellPadding (same offset autoTable uses for left-aligned text).
+                                        const midY = data.cell.y + data.cell.height / 2;
+                                        const startX = data.cell.x + cellPadding;
+
+                                        // Note goes right after the name
+                                        const noteX = startX + nameWidth + 2;
+                                        data.doc.setFont('helvetica', 'bolditalic');
+                                        data.doc.setTextColor(0, 0, 0);
+                                        data.doc.text(notePart, noteX, midY, { baseline: 'middle' });
+
+                                        // Underline the note
+                                        data.doc.setFont('helvetica', 'bolditalic');
+                                        data.doc.setFontSize(fontSize);
+                                        const noteWidth = data.doc.getTextWidth(notePart);
+                                        data.doc.setLineWidth(0.1);
+                                        data.doc.setDrawColor(0, 0, 0);
+                                        data.doc.line(noteX, midY + (fontSize * 0.3), noteX + noteWidth, midY + (fontSize * 0.3));
                                     }
                                 }
                             }

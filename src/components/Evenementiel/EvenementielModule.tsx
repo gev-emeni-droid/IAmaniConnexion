@@ -429,13 +429,6 @@ export const EvenementielModule = () => {
 
     return (
         <div className="space-y-10">
-            <InfoModal 
-                id="evenementiel_news_v2"
-                title="Nouveautés Événementiel"
-                message="Nouveautés : vous pouvez désormais ajouter des fichiers à vos privatisations et préciser s'il s'agit d'un événement privé ou professionnel. Les notifications s'envoient maintenant automatiquement : plus besoin d'ouvrir votre boîte mail, cliquez simplement sur « Notifier » et sélectionnez le destinataire."
-                isOpen={showInfoModal}
-                onClose={() => setShowInfoModal(false)}
-            />
             <header className="no-print flex items-center justify-between">
                 <div>
                     <h1 className="text-3xl font-bold text-[var(--text-primary)] tracking-tight">Module Événementiel</h1>

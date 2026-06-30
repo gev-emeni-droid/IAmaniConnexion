@@ -1000,13 +1000,6 @@ export const PlanningModule = () => {
 
     return (
         <div className="p-4 md:p-8 min-h-screen dark:bg-[#0A0A0A]">
-            <InfoModal
-                id="planning_tips_v2"
-                title="Optimisez votre gestion"
-                message="Optimisez votre gestion : n'oubliez pas de configurer vos modèles d'horaires dans les paramètres, ainsi que les horaires par défaut de chaque employé, pour une meilleure expérience d'utilisation."
-                isOpen={showInfoModal}
-                onClose={() => setShowInfoModal(false)}
-            />
             <div className="space-y-5 font-sans text-slate-800 dark:text-slate-200 max-w-[1700px] mx-auto bg-slate-100 dark:bg-slate-900/50 p-4 rounded-2xl border border-slate-200 dark:border-white/10">
                 <header className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-2xl shadow-sm px-4 py-3 md:px-5 md:py-4 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
                     <div className="flex items-center gap-3">

@@ -39,13 +39,6 @@ export const FacturesModule = () => {
 
     return (
         <>
-            <InfoModal
-                id="facture_welcome_v1"
-                title="Module Facturation"
-                message="Bienvenue dans votre module de facturation. Envoyez désormais les factures directement à vos clients depuis le bouton « Envoyer la facture »."
-                isOpen={showInfoModal}
-                onClose={() => setShowInfoModal(false)}
-            />
             {renderContent()}
 
             {previewInvoice && (
