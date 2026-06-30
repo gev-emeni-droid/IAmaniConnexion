@@ -598,16 +598,18 @@ export const PlanningExportModal: React.FC<PlanningExportModalProps> = ({
                                         // Note goes right after the name
                                         const noteX = startX + nameWidth + 2;
                                         data.doc.setFont('helvetica', 'bolditalic');
-                                        data.doc.setTextColor(0, 0, 0);
-                                        data.doc.text(notePart, noteX, midY, { baseline: 'middle' });
-
-                                        // Underline the note
-                                        data.doc.setFont('helvetica', 'bolditalic');
                                         data.doc.setFontSize(fontSize);
                                         const noteWidth = data.doc.getTextWidth(notePart);
-                                        data.doc.setLineWidth(0.1);
-                                        data.doc.setDrawColor(0, 0, 0);
-                                        data.doc.line(noteX, midY + (fontSize * 0.3), noteX + noteWidth, midY + (fontSize * 0.3));
+
+                                        // Surlignage jaune derrière la note (comme un marqueur)
+                                        const highlightH = data.cell.height * 0.72;
+                                        const highlightY = midY - highlightH / 2;
+                                        data.doc.setFillColor(255, 235, 59); // jaune vif
+                                        data.doc.rect(noteX - 0.5, highlightY, noteWidth + 1, highlightH, 'F');
+
+                                        // Texte de la note en gras italique par-dessus le surlignage
+                                        data.doc.setTextColor(30, 30, 30);
+                                        data.doc.text(notePart, noteX, midY, { baseline: 'middle' });
                                     }
                                 }
                             }
